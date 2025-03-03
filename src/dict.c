@@ -41,16 +41,16 @@
 static dictResizeEnable dict_can_resize = DICT_RESIZE_ENABLE;
 static unsigned int dict_force_resize_ratio = 4;
 
-/* -------------------------- types ----------------------------------------- */
+/* -------------------------- 类型 ----------------------------------------- */
 struct dictEntry {
-    void *key;
+    void *key; /* 键 */
     union {
-        void *val;
+        void *val; /* 原始值 */
         uint64_t u64;
         int64_t s64;
         double d;
     } v;
-    struct dictEntry *next;     /* Next entry in the same hash bucket. */
+    struct dictEntry *next;     /* 在相同哈希桶中的下一个条目 */
 };
 
 typedef struct {
@@ -437,14 +437,14 @@ int dictRehashMicroseconds(dict *d, uint64_t us) {
     return rehashes;
 }
 
-/* This function performs just a step of rehashing, and only if hashing has
- * not been paused for our hash table. When we have iterators in the
- * middle of a rehashing we can't mess with the two hash tables otherwise
- * some elements can be missed or duplicated.
- *
- * This function is called by common lookup or update operations in the
- * dictionary so that the hash table automatically migrates from H1 to H2
- * while it is actively used. */
+/**
+ * 该函数仅执行rehash的一个步骤，并且仅当哈希表未暂停时才会执行。
+ * 当我们在rehash中间由迭代器时，我们不能弄乱两个哈希表，否则某些
+ * 元素可能会丢失或重复。
+ * 
+ * 该函数被对字段的通用查找或更新操作调用，使得哈希表在被积极使用时
+ * 自动从H1迁移到H2。
+ */
 static void _dictRehashStep(dict *d) {
     if (d->pauserehash == 0) dictRehash(d,1);
 }
@@ -778,26 +778,29 @@ void *dictFetchValue(dict *d, const void *key) {
     return he ? dictGetVal(he) : NULL;
 }
 
-/* Find an element from the table, also get the plink of the entry. The entry
- * is returned if the element is found, and the user should later call
- * `dictTwoPhaseUnlinkFree` with it in order to unlink and release it. Otherwise if
- * the key is not found, NULL is returned. These two functions should be used in pair.
- * `dictTwoPhaseUnlinkFind` pauses rehash and `dictTwoPhaseUnlinkFree` resumes rehash.
- *
- * We can use like this:
- *
- * dictEntry *de = dictTwoPhaseUnlinkFind(db->dict,key->ptr,&plink, &table);
+/**
+ * 从哈希表中查找元素，还可以获得条目的链接。如果元素被找到则返回条目，
+ * 用户之后应该调用`dictTwoPhaseUnlinkFree`以便解除链接并释放它。
+ * 否则如果没有元素，则返回NULL。
+ * 
+ * 这两个函数应该成对使用，`dictTwoPhaseUnlinkFind`暂停哈希和
+ * `dictTwoPhaseUnlinkFree`回复哈希。
+ * 
+ * 使用实例：
+ * 
+ * dictEntry *de = dictTwoPhaseUnlinkFind(db->dict, key->ptr, &plink, &table);
  * // Do something, but we can't modify the dict
- * dictTwoPhaseUnlinkFree(db->dict,de,plink,table); // We don't need to lookup again
- *
- * If we want to find an entry before delete this entry, this an optimization to avoid
- * dictFind followed by dictDelete. i.e. the first API is a find, and it gives some info
- * to the second one to avoid repeating the lookup
+ * dictTwoPhaseUnlinkFree(db->dict, de, plink, table); // We don't need to lookup again
+ * 
+ * 如果想要在删除之前查找该条目，这是一个优化，以避免dictFind之后跟dictDelete。
+ * dictFind用于查找，然后为第二个提供某些信息以避免重复查找。
  */
 dictEntry *dictTwoPhaseUnlinkFind(dict *d, const void *key, dictEntry ***plink, int *table_index) {
     uint64_t h, idx, table;
 
-    if (dictSize(d) == 0) return NULL; /* dict is empty */
+    // 当字典中没有元素时，直接返回NULL
+    if (dictSize(d) == 0) return NULL;
+    // 如果正在rehash，则
     if (dictIsRehashing(d)) _dictRehashStep(d);
 
     h = dictHashKey(d, key, d->useStoredKeyApi);

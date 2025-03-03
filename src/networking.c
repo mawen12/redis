@@ -253,59 +253,55 @@ void putClientInPendingWriteQueue(client *c) {
     }
 }
 
-/* This function is called every time we are going to transmit new data
- * to the client. The behavior is the following:
- *
- * If the client should receive new data (normal clients will) the function
- * returns C_OK, and make sure to install the write handler in our event
- * loop so that when the socket is writable new data gets written.
- *
- * If the client should not receive new data, because it is a fake client
- * (used to load AOF in memory), a master or because the setup of the write
- * handler failed, the function returns C_ERR.
- *
- * The function may return C_OK without actually installing the write
- * event handler in the following cases:
- *
- * 1) The event handler should already be installed since the output buffer
- *    already contains something.
- * 2) The client is a slave but not yet online, so we want to just accumulate
- *    writes in the buffer but not actually sending them yet.
- *
- * Typically gets called every time a reply is built, before adding more
- * data to the clients output buffers. If the function returns C_ERR no
- * data should be appended to the output buffers. */
+/**
+ * 每当Redis Server准备传递新的数据到客户端时，便会调用该函数，行为如下：
+ * 
+ * 如果客户端应该接受新数据（通常来说客户端都会接受），该函数将返回 C_OK，
+ * 并确保在event loop中安装了write handler，这样当socket可写时，新数据
+ * 能够被写入。
+ * 
+ * 如果客户端不应该接受新数据，因为它是一个fake客户端（例如在内存中加载AOF），
+ * 一个master或因为write handler设置失败，该函数将返回C_ERR。
+ * 
+ * 在以下场景中，函数将返回C_OK而无需安装write handler：
+ *  1.由于输出缓冲区已经存在内容，因此可以认为event handler已经被安装了。
+ *  2.客户端是一个slave，但是并不在线，所以Redis Server想要仅仅计算缓冲区
+ *      的写大小，但并不会实际发送给它们。
+ * 
+ * 通常在每次建立回复时都会调用，然后再将更多数据添加到客户端输出缓冲区。
+ * 如果函数返回C_ERR，则不应将任何数据添加到输出缓冲区
+ */
 int prepareClientToWrite(client *c) {
-    /* If it's the Lua client we always return ok without installing any
-     * handler since there is no socket at all. */
+    /* 如果是Lua客户端，则总是返回true，而无需安装任何的handler，
+        因为根本没有任何的socket */
     if (c->flags & (CLIENT_SCRIPT|CLIENT_MODULE)) return C_OK;
 
-    /* If CLIENT_CLOSE_ASAP flag is set, we need not write anything. */
+    /* 如果客户端设置了 CLIENT_CLOSE_ASAP 标识，则不需要写任何东西 */
     if (c->flags & CLIENT_CLOSE_ASAP) return C_ERR;
 
-    /* CLIENT REPLY OFF / SKIP handling: don't send replies.
-     * CLIENT_PUSHING handling: disables the reply silencing flags. */
+    /* 对于 CLIENT_REPLAY_OFF 或 CLIENT_REPLY_SKIP 标识，不发送任何回复。
+        CLIENT_PUSHING 处理：禁用回复默认标识*/
     if ((c->flags & (CLIENT_REPLY_OFF|CLIENT_REPLY_SKIP)) &&
         !(c->flags & CLIENT_PUSHING)) return C_ERR;
 
-    /* Masters don't receive replies, unless CLIENT_MASTER_FORCE_REPLY flag
-     * is set. */
+    /* Master不需要接受回复，除非设置了 CLIENT_MASTER_FORCE_REPLY 标识 */
     if ((c->flags & CLIENT_MASTER) &&
         !(c->flags & CLIENT_MASTER_FORCE_REPLY)) return C_ERR;
 
-    if (!c->conn) return C_ERR; /* Fake client for AOF loading. */
+    /* 用于加载 AOF 的虚假客户端 */
+    if (!c->conn) return C_ERR;
 
-    /* Schedule the client to write the output buffers to the socket, unless
-     * it should already be setup to do so (it has already pending data).
-     *
-     * If CLIENT_PENDING_READ is set, we're in an IO thread and should
-     * not put the client in pending write queue. Instead, it will be
-     * done by handleClientsWithPendingReadsUsingThreads() upon return.
+    /**
+     * 调度客户端来写输出缓冲区到socket，除非它应该已经被设置去做，（即它已经发送数据）。
+     * 
+     * 如果设置了 CLIENT_PENDING_READ 标识，Redis Server在一个IO线程，并应该不要把
+     * 客户端放到发送中的写队列。相反，它将在返回时由 handleClientsWithPendingReadsUsingThreads()
+     * 完成。
      */
     if (!clientHasPendingReplies(c) && io_threads_op == IO_THREADS_OP_IDLE)
         putClientInPendingWriteQueue(c);
 
-    /* Authorize the caller to queue in the output buffer of this client. */
+    /* 授权调用者在此客户端的输出缓冲区中排队 */
     return C_OK;
 }
 
@@ -420,12 +416,13 @@ void _addReplyToBufferOrList(client *c, const char *s, size_t len) {
 }
 
 /* -----------------------------------------------------------------------------
- * Higher level functions to queue data on the client output buffer.
- * The following functions are the ones that commands implementations will call.
+ * 更高级的函数，用于在客户端的输出缓冲区上对数据进行排队
+ * 以下函数是命令实现将调用的函数。
  * -------------------------------------------------------------------------- */
 
-/* Add the object 'obj' string representation to the client output buffer. */
+/* 添加对象的字符串表示到客户端的输出缓冲区 */
 void addReply(client *c, robj *obj) {
+    // 此处第二次判断客户端是否可写
     if (prepareClientToWrite(c) != C_OK) return;
 
     if (sdsEncodedObject(obj)) {
@@ -463,7 +460,9 @@ void addReplySds(client *c, sds s) {
  * _addReplyProtoToList() if we fail to extend the existing tail object
  * in the list of objects. */
 void addReplyProto(client *c, const char *s, size_t len) {
+    // 此处第三次判断客户端是否可写
     if (prepareClientToWrite(c) != C_OK) return;
+    // 写入字符
     _addReplyToBufferOrList(c,s,len);
 }
 
@@ -1030,17 +1029,23 @@ void addReplyNullArray(client *c) {
     }
 }
 
-/* Create the length prefix of a bulk reply, example: $2234 */
+/* 创建批恢复的长度前缀，例如: $2234 */
 void addReplyBulkLen(client *c, robj *obj) {
+    // 计算对象长度
     size_t len = stringObjectLen(obj);
+    // 检查客户端是否可写，某些情况下，客户端不可写则直接返回 
     if (prepareClientToWrite(c) != C_OK) return;
+    // 添加长度前缀，格式为$len
     _addReplyLongLongWithPrefix(c, len, '$');
 }
 
-/* Add a Redis Object as a bulk reply */
+/* 添加一个Redis对象作为批回复 */
 void addReplyBulk(client *c, robj *obj) {
+    // 添加批回复的长度前缀，如$2234
     addReplyBulkLen(c,obj);
+    // 写入Redis对象
     addReply(c,obj);
+    // 写入\r\n作为后缀
     addReplyProto(c,"\r\n",2);
 }
 

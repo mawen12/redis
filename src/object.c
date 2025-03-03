@@ -563,8 +563,9 @@ void decrRefCountVoid(void *o) {
 }
 
 int checkType(client *c, robj *o, int type) {
-    /* A NULL is considered an empty key */
+    /* NULL 被视作空key */
     if (o && o->type != type) {
+        /* 类型错误，将返回错误 */
         addReplyErrorObject(c,shared.wrongtypeerr);
         return 1;
     }
@@ -603,26 +604,30 @@ void trimStringObjectIfNeeded(robj *o, int trim_small_values) {
     }
 }
 
-/* Try to encode a string object in order to save space */
+/**
+ * 尝试对字符串对象进行编码，以便节省空间
+ */
 robj *tryObjectEncodingEx(robj *o, int try_trim) {
     long value;
     sds s = o->ptr;
     size_t len;
 
-    /* Make sure this is a string object, the only type we encode
-     * in this function. Other types use encoded memory efficient
-     * representations but are handled by the commands implementing
-     * the type. */
+    /**
+     * 确保为String对象，该函数仅支持String对象。其他类型使用编码高效表示，
+     * 但由实现该类型的命令处理
+     */
     serverAssertWithInfo(NULL,o,o->type == OBJ_STRING);
 
-    /* We try some specialized encoding only for objects that are
-     * RAW or EMBSTR encoded, in other words objects that are still
-     * in represented by an actually array of chars. */
+    /**
+     * 尝试仅对RAW或EMBSTR编码的对象进行一些专门的编码。
+     * 换句话说，这些对象仍然有实际的字符数组所表示。
+     */
     if (!sdsEncodedObject(o)) return o;
 
-    /* It's not safe to encode shared objects: shared objects can be shared
-     * everywhere in the "object space" of Redis and may end in places where
-     * they are not handled. We handle them only as values in the keyspace. */
+    /**
+     * 对共享对象编码并不安全：共享对象可以在Rdis的对象空间中任意位置被共享，
+     * 并可能在未处理它们的地方结束。我们仅将它们作为键空间中的值进行处理。
+     */
      if (o->refcount > 1) return o;
 
     /* Check if we can represent this string as a long integer.

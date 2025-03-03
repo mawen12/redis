@@ -68,7 +68,9 @@ typedef struct {
 /*** Helpers **********************/
 /**********************************/
 
-/* Get the dictionary pointer based on dict-index. */
+/**
+ * 基于字段索引返回字典指针
+ */
 static dict *kvstoreGetDict(kvstore *kvs, int didx) {
     return kvs->dicts[didx];
 }
@@ -831,9 +833,12 @@ void kvstoreDictSetVal(kvstore *kvs, int didx, dictEntry *de, void *val) {
 }
 
 dictEntry *kvstoreDictTwoPhaseUnlinkFind(kvstore *kvs, int didx, const void *key, dictEntry ***plink, int *table_index) {
+    // 获取指定索引的字典
     dict *d = kvstoreGetDict(kvs, didx);
+    // 字典不存在，则返回空
     if (!d)
         return NULL;
+    // 
     return dictTwoPhaseUnlinkFind(kvstoreGetDict(kvs, didx), key, plink, table_index);
 }
 

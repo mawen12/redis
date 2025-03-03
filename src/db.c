@@ -45,34 +45,33 @@ void updateLFU(robj *val) {
     val->lru = (LFUGetTimeInMinutes()<<8) | counter;
 }
 
-/* Lookup a key for read or write operations, or return NULL if the key is not
- * found in the specified DB. This function implements the functionality of
- * lookupKeyRead(), lookupKeyWrite() and their ...WithFlags() variants.
- *
- * Side-effects of calling this function:
- *
- * 1. A key gets expired if it reached it's TTL.
- * 2. The key's last access time is updated.
- * 3. The global keys hits/misses stats are updated (reported in INFO).
- * 4. If keyspace notifications are enabled, a "keymiss" notification is fired.
- *
- * Flags change the behavior of this command:
- *
- *  LOOKUP_NONE (or zero): No special flags are passed.
- *  LOOKUP_NOTOUCH: Don't alter the last access time of the key.
- *  LOOKUP_NONOTIFY: Don't trigger keyspace event on key miss.
- *  LOOKUP_NOSTATS: Don't increment key hits/misses counters.
- *  LOOKUP_WRITE: Prepare the key for writing (delete expired keys even on
- *                replicas, use separate keyspace stats and events (TODO)).
- *  LOOKUP_NOEXPIRE: Perform expiration check, but avoid deleting the key,
- *                   so that we don't have to propagate the deletion.
- *
- * Note: this function also returns NULL if the key is logically expired but
- * still existing, in case this is a replica and the LOOKUP_WRITE is not set.
- * Even if the key expiry is master-driven, we can correctly report a key is
- * expired on replicas even if the master is lagging expiring our key via DELs
- * in the replication link. */
+/**
+ * 查找用于Read或Write操作的key，如果key在指定DB中不存在，则返回NULL。
+ * 该函数作为lookupKeyRead(), lookupKeyWrite()以及带有 ...WithFlags 后缀的底层实现。
+ * 
+ * 调用此函数的副作用：
+ *  1.如果该key到达了其TTL，那么将会过期
+ *  2.更新该key的最后访问时间（last access time）
+ *  3.更新全局key的命中或缺失的统计信息（INFO中报告）
+ *  4.如果开启了keyspace通知，找不到该key将触发一个"keymiss"通知
+ * 
+ * Flags在此函数中的不同行为：
+ *  LOOKUP_NONE (or zero): 没有特殊标志被传递
+ *  LOOKUP_NOTOUCH: 不更新该key的最后访问时间
+ *  LOOKUP_NONOTIFY: 当key未命中时不会触发通知
+ *  LOOKUP_NOSTATS: 不会增加Key命中或缺失时的计数器
+ *  LOOKUP_WRITE: 将该键用于写操作（即使在副本上也删除过期的key，
+ *      使用单独的keyspace统计信息和事件(TODO)）
+ *  LOOKUP_NOEXPIRE: 执行过期检查，但不会删除key，这样就不会传播
+ *      删除操作。
+ * 
+ * 注意：如果逻辑上该key过期了但是还存在，该函数仍然会返回NULL，以防
+ *      此Redis Server是一个副本且未设置LOOKUP_WRITE。即使key的过期
+ *      是由master驱动的，我们也可以正确报告key在副本上已过期，即使
+ *      master通过replication链接中的DEL使密钥过期滞后。
+ */
 robj *lookupKey(redisDb *db, robj *key, int flags) {
+    // 
     dictEntry *de = dbFind(db, key->ptr);
     robj *val = NULL;
     if (de) {
@@ -198,26 +197,30 @@ dictEntry *dbAdd(redisDb *db, robj *key, robj *val) {
     return dbAddInternal(db, key, val, 0);
 }
 
-/* Returns key's hash slot when cluster mode is enabled, or 0 when disabled.
- * The only difference between this function and getKeySlot, is that it's not using cached key slot from the current_client
- * and always calculates CRC hash.
- * This is useful when slot needs to be calculated for a key that user didn't request for, such as in case of eviction. */
+/**
+ * 当启用集群模式时，返回key的哈希槽；当禁用集群模式时，返回0。
+ * 此方法与getKeySlot的唯一区别在于: 该方法不会使用从当前客户端获取缓存的key槽，而是总是计算CRC哈希值。
+ * 当需要为用户未请求的key计算槽位时(例如在驱逐的情况下)，这会很有用。
+ */
 int calculateKeySlot(sds key) {
     return server.cluster_enabled ? keyHashSlot(key, (int) sdslen(key)) : 0;
 }
 
-/* Return slot-specific dictionary for key based on key's hash slot when cluster mode is enabled, else 0.*/
+/**
+ * 当启用集群模式时，根据key的哈希槽返回key特定于槽的字段；否则返回0
+ */
 int getKeySlot(sds key) {
-    /* This is performance optimization that uses pre-set slot id from the current command,
-     * in order to avoid calculation of the key hash.
-     * This optimization is only used when current_client flag `CLIENT_EXECUTING_COMMAND` is set.
-     * It only gets set during the execution of command under `call` method. Other flows requesting
-     * the key slot would fallback to calculateKeySlot.
+    /**
+     * 这是一个性能优化，通过使用当前命令中的预设置的槽id，来避免计算key的哈希值。
+     * 仅在当前客户端标识设置为CLIENT_EXECUTING_COMAMND才会被使用。
+     * 它仅在使用call方法执行命令时设置，请求密钥槽的其它流程将回退到calculateKeySlot方法。
      */
     if (server.current_client && server.current_client->slot >= 0 && server.current_client->flags & CLIENT_EXECUTING_COMMAND) {
         debugServerAssertWithInfo(server.current_client, NULL, calculateKeySlot(key)==server.current_client->slot);
+        // 使用性能优化，执行从当前客户端获取槽id
         return server.current_client->slot;
     }
+    // 不满足性能优化的条件，需要根据key的哈希值计算槽id
     return calculateKeySlot(key);
 }
 
@@ -368,13 +371,18 @@ robj *dbRandomKey(redisDb *db) {
     }
 }
 
-/* Helper for sync and async delete. */
+/**
+ * 用于同步和异步删除的帮助类
+ */
 int dbGenericDelete(redisDb *db, robj *key, int async, int flags) {
     dictEntry **plink;
     int table;
+    // 计算key的哈希值，并确定槽id
     int slot = getKeySlot(key->ptr);
+    // 键值存储字典双向无链接查找，获取字典条目
     dictEntry *de = kvstoreDictTwoPhaseUnlinkFind(db->keys, slot, key->ptr, &plink, &table);
     if (de) {
+        // 从字典条目中获取实际的值
         robj *val = dictGetVal(de);
 
         /* If hash object with expiry on fields, remove it from HFE DS of DB */
@@ -407,7 +415,7 @@ int dbGenericDelete(redisDb *db, robj *key, int async, int flags) {
     }
 }
 
-/* Delete a key, value, and associated expiration entry if any, from the DB */
+/* 从数据库中删除一个key, 值和关联的过期条目(如果存在) */
 int dbSyncDelete(redisDb *db, robj *key) {
     return dbGenericDelete(db, key, 0, DB_FLAG_KEY_DELETED);
 }
@@ -2061,6 +2069,9 @@ static dictEntry *dbFindGeneric(kvstore *kvs, void *key) {
     return kvstoreDictFind(kvs, getKeySlot(key), key);
 }
 
+/**
+ * 从指定的db中查找指定的key，并返回结果
+ */
 dictEntry *dbFind(redisDb *db, void *key) {
     return dbFindGeneric(db->keys, key);
 }

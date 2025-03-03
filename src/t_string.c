@@ -169,21 +169,22 @@ static int getExpireMillisecondsOrReply(client *c, robj *expire, int flags, int 
 
 #define COMMAND_GET 0
 #define COMMAND_SET 1
-/*
- * The parseExtendedStringArgumentsOrReply() function performs the common validation for extended
- * string arguments used in SET and GET command.
- *
- * Get specific commands - PERSIST/DEL
- * Set specific commands - XX/NX/GET
- * Common commands - EX/EXAT/PX/PXAT/KEEPTTL
- *
- * Function takes pointers to client, flags, unit, pointer to pointer of expire obj if needed
- * to be determined and command_type which can be COMMAND_GET or COMMAND_SET.
- *
- * If there are any syntax violations C_ERR is returned else C_OK is returned.
- *
- * Input flags are updated upon parsing the arguments. Unit and expire are updated if there are any
- * EX/EXAT/PX/PXAT arguments. Unit is updated to millisecond if PX/PXAT is set.
+
+/**
+ * 该函数用于对在SET和GET命令中扩展的字符串参数执行通用校验。
+ * 
+ * Get特定命令 - PERSIST/DEL
+ * Set特定命令 - XX/NX/GET
+ * 通用命令 - EX/EXAT/PX/PXAT/KEEPTTL
+ * 
+ * 函数采用指向客户端、标志位、时间单位、指向过期对象的指针(如果需要确定)和
+ * 命令类型（可以是COMMAND_GET或COMMAND_SET）。
+ * 
+ * 如果有任何的语法错误将返回C_ERR，否则返回C_OK。
+ * 
+ * 
+ * 一旦参数被解析，将更新输入标识符。如果是EX/EXAT/PX/PXAT参数，则更新Unit和expire。
+ * 如果设置了PX/PXAT，则Unit被更新为millisecond。
  */
 int parseExtendedStringArgumentsOrReply(client *c, int *flags, int *unit, robj **expire, int command_type) {
 
@@ -269,17 +270,21 @@ int parseExtendedStringArgumentsOrReply(client *c, int *flags, int *unit, robj *
     return C_OK;
 }
 
-/* SET key value [NX] [XX] [KEEPTTL] [GET] [EX <seconds>] [PX <milliseconds>]
- *     [EXAT <seconds-timestamp>][PXAT <milliseconds-timestamp>] */
+/**
+ * SET key value [NX] [XX] [KEEPTTL] [GET] [EX <seconds>] [PX <milliseconds>]
+ *      [EXAT <seconds-timestamp>][PXAT <milliseconds-timestamp>] 命令入口
+ */
 void setCommand(client *c) {
-    robj *expire = NULL;
-    int unit = UNIT_SECONDS;
-    int flags = OBJ_NO_FLAGS;
+    robj *expire = NULL; // 默认无过期时间
+    int unit = UNIT_SECONDS; // 默认过期时间单位为秒
+    int flags = OBJ_NO_FLAGS; // 默认为无标识符
 
+    // 解析SET的扩展参数是否合法
     if (parseExtendedStringArgumentsOrReply(c,&flags,&unit,&expire,COMMAND_SET) != C_OK) {
         return;
     }
 
+    // 
     c->argv[2] = tryObjectEncoding(c->argv[2]);
     setGenericCommand(c,flags,c->argv[1],c->argv[2],expire,unit,NULL,NULL);
 }
@@ -300,19 +305,27 @@ void psetexCommand(client *c) {
 }
 
 int getGenericCommand(client *c) {
-    robj *o;
+    robj *o; // 保存从db中对应key获取的值
 
+    // 根据key获取条目，如果key不存在或已过期，则返回NULL，视作成功
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.null[c->resp])) == NULL)
         return C_OK;
 
+    // 值的类型必须为String对象
     if (checkType(c,o,OBJ_STRING)) {
         return C_ERR;
     }
 
+    // 将对象写入到客户端的输出缓冲区
     addReplyBulk(c,o);
+
+    // 返回成功标识
     return C_OK;
 }
 
+/**
+ * GET <key> 命令的入口
+ */
 void getCommand(client *c) {
     getGenericCommand(c);
 }
@@ -396,8 +409,13 @@ void getexCommand(client *c) {
     }
 }
 
+/**
+ * GETDEL <key> 的命令入口
+ */
 void getdelCommand(client *c) {
+    // 当获取key对应的value报错时，直接返回
     if (getGenericCommand(c) == C_ERR) return;
+    // 
     if (dbSyncDelete(c->db, c->argv[1])) {
         /* Propagate as DEL command */
         rewriteClientCommandVector(c,2,shared.del,c->argv[1]);

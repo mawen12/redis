@@ -34,30 +34,31 @@ struct clusterState;
 
 /* ---------------------- API exported outside cluster.c -------------------- */
 
-/* We have 16384 hash slots. The hash slot of a given key is obtained
- * as the least significant 14 bits of the crc16 of the key.
- *
- * However, if the key contains the {...} pattern, only the part between
- * { and } is hashed. This may be useful in the future to force certain
- * keys to be in the same node (assuming no resharding is in progress). */
+/**
+ * Redis有16384个哈希槽。给定key的哈希槽是key crc16的最低有效14位。
+ * 
+ * 然后，如果Key包含{...}的模式，仅在{和}之间的部分被计算哈希。这在将来
+ * 可能会很有用，以强制某些键位于同一节点（假设没有正在进行重新分片）。
+ */
 static inline unsigned int keyHashSlot(char *key, int keylen) {
     int s, e; /* start-end indexes of { and } */
 
     for (s = 0; s < keylen; s++)
-        if (key[s] == '{') break;
+        if (key[s] == '{') break; /* 仅处理{之后的部分 */
 
-    /* No '{' ? Hash the whole key. This is the base case. */
+    
+    /* 当key中不存在'{'是，直接计算，并取crc16的最低有效14位 */
     if (likely(s == keylen)) return crc16(key,keylen) & 0x3FFF;
 
-    /* '{' found? Check if we have the corresponding '}'. */
+    
+    /* 存在'{'，则尝试查找'}' */
     for (e = s+1; e < keylen; e++)
         if (key[e] == '}') break;
 
-    /* No '}' or nothing between {} ? Hash the whole key. */
+    /* 不存在'}'，或{}之间没有任何内容，则计算整个key */
     if (e == keylen || e == s+1) return crc16(key,keylen) & 0x3FFF;
 
-    /* If we are here there is both a { and a } on its right. Hash
-     * what is in the middle between { and }. */
+    /* 如果同时存在{}，且其中存在内容，则计算{}之间的 */
     return crc16(key+s+1,e-s-1) & 0x3FFF;
 }
 

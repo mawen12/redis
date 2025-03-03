@@ -686,17 +686,17 @@ typedef enum {
 #define BUSY_MODULE_YIELD_CLIENTS (1<<1)
 
 /*-----------------------------------------------------------------------------
- * Data types
+ * 数据类型
  *----------------------------------------------------------------------------*/
 
 /* A redis object, that is a type able to hold a string / list / set */
 
-/* The actual Redis Object */
-#define OBJ_STRING 0    /* String object. */
-#define OBJ_LIST 1      /* List object. */
-#define OBJ_SET 2       /* Set object. */
-#define OBJ_ZSET 3      /* Sorted set object. */
-#define OBJ_HASH 4      /* Hash object. */
+/* 实际的Redis对象，也是Redis基本的五大对象 */
+#define OBJ_STRING 0    /* String 对象. */
+#define OBJ_LIST 1      /* List 对象. */
+#define OBJ_SET 2       /* Set 对象. */
+#define OBJ_ZSET 3      /* Sorted set 对象. */
+#define OBJ_HASH 4      /* Hash 对象. */
 
 /* The "module" object type is a special one that signals that the object
  * is one directly managed by a Redis module. In this case the value points
@@ -900,6 +900,10 @@ struct RedisModuleDigest {
 #define OBJ_SHARED_REFCOUNT INT_MAX     /* Global object never destroyed. */
 #define OBJ_STATIC_REFCOUNT (INT_MAX-1) /* Object allocated in the stack. */
 #define OBJ_FIRST_SPECIAL_REFCOUNT OBJ_STATIC_REFCOUNT
+
+/**
+ * 代表Redis对象的类
+ */
 struct redisObject {
     unsigned type:4;
     unsigned encoding:4;
@@ -2603,7 +2607,7 @@ void addReplyBool(client *c, int b);
 void addReplyVerbatim(client *c, const char *s, size_t len, const char *ext);
 void addReplyProto(client *c, const char *s, size_t len);
 void AddReplyFromClient(client *c, client *src);
-void addReplyBulk(client *c, robj *obj);
+void addReplyBulk(client *c, robj *obj);/* networking.c */
 void addReplyBulkCString(client *c, const char *s);
 void addReplyBulkCBuffer(client *c, const void *p, size_t len);
 void addReplyBulkLongLong(client *c, long long ll);
@@ -2810,7 +2814,7 @@ robj *createModuleObject(moduleType *mt, void *value);
 int getLongFromObjectOrReply(client *c, robj *o, long *target, const char *msg);
 int getPositiveLongFromObjectOrReply(client *c, robj *o, long *target, const char *msg);
 int getRangeLongFromObjectOrReply(client *c, robj *o, long min, long max, long *target, const char *msg);
-int checkType(client *c, robj *o, int type);
+int checkType(client *c, robj *o, int type);/* object.c */
 int getLongLongFromObjectOrReply(client *c, robj *o, long long *target, const char *msg);
 int getDoubleFromObjectOrReply(client *c, robj *o, double *target, const char *msg);
 int getDoubleFromObject(const robj *o, double *target);
