@@ -318,12 +318,12 @@ extern int configOOMScoreAdjValuesDefaults[CONFIG_OOM_COUNT];
 #define CMD_DOC_DEPRECATED (1<<0) /* Command is deprecated */
 #define CMD_DOC_SYSCMD (1<<1) /* System (internal) command */
 
-/* Client flags */
-#define CLIENT_SLAVE (1<<0)   /* This client is a replica */
-#define CLIENT_MASTER (1<<1)  /* This client is a master */
-#define CLIENT_MONITOR (1<<2) /* This client is a slave monitor, see MONITOR */
-#define CLIENT_MULTI (1<<3)   /* This client is in a MULTI context */
-#define CLIENT_BLOCKED (1<<4) /* The client is waiting in a blocking operation */
+/* 客户端标识 */
+#define CLIENT_SLAVE (1<<0)   /* 该客户端是一个slave（也被称作副本） */
+#define CLIENT_MASTER (1<<1)  /* 该客户端是一个master */
+#define CLIENT_MONITOR (1<<2) /* 该客户端是一个slave MONITOR， see MONITOR */
+#define CLIENT_MULTI (1<<3)   /* 该客户端位于多个上下文中 */
+#define CLIENT_BLOCKED (1<<4) /* 该客户端在阻塞操作中等待 */
 #define CLIENT_DIRTY_CAS (1<<5) /* Watched keys modified. EXEC will fail. */
 #define CLIENT_CLOSE_AFTER_REPLY (1<<6) /* Close after writing entire reply. */
 #define CLIENT_UNBLOCKED (1<<7) /* This client was unblocked and is stored in
@@ -381,8 +381,8 @@ extern int configOOMScoreAdjValuesDefaults[CONFIG_OOM_COUNT];
                                       memory eviction. */
 #define CLIENT_ALLOW_OOM (1ULL<<44) /* Client used by RM_Call is allowed to fully execute
                                        scripts even when in OOM */
-#define CLIENT_NO_TOUCH (1ULL<<45) /* This client will not touch LFU/LRU stats. */
-#define CLIENT_PUSHING (1ULL<<46) /* This client is pushing notifications. */
+#define CLIENT_NO_TOUCH (1ULL<<45) /* 该客户端不会更新LFU/LRU统计数据 */
+#define CLIENT_PUSHING (1ULL<<46) /* 客户端正在发布通知 */
 #define CLIENT_MODULE_AUTH_HAS_RESULT (1ULL<<47) /* Indicates a client in the middle of module based
                                                     auth had been authenticated from the Module. */
 #define CLIENT_MODULE_PREVENT_AOF_PROP (1ULL<<48) /* Module client do not want to propagate to AOF */
@@ -550,14 +550,15 @@ typedef enum {
 #define OOM_SCORE_RELATIVE 1
 #define OOM_SCORE_ADJ_ABSOLUTE 2
 
-/* Redis maxmemory strategies. Instead of using just incremental number
- * for this defines, we use a set of flags so that testing for certain
- * properties common to multiple policies is faster. */
-#define MAXMEMORY_FLAG_LRU (1<<0)
-#define MAXMEMORY_FLAG_LFU (1<<1)
-#define MAXMEMORY_FLAG_ALLKEYS (1<<2)
-#define MAXMEMORY_FLAG_NO_SHARED_INTEGERS \
-    (MAXMEMORY_FLAG_LRU|MAXMEMORY_FLAG_LFU)
+/**
+ * Redis最大内存策略，我们使用一组标志来定义此策略，而不是仅仅使用一组增量数字，
+ * 这样可以更快的测试多个策略共有的某些属性。
+ */
+#define MAXMEMORY_FLAG_LRU (1<<0)           /* LRU算法: 0001 */
+#define MAXMEMORY_FLAG_LFU (1<<1)           /* LFU算法: 0010 */
+#define MAXMEMORY_FLAG_ALLKEYS (1<<2)       /* 所有KEY: 0100 */
+#define MAXMEMORY_FLAG_NO_SHARED_INTEGERS \ 
+    (MAXMEMORY_FLAG_LRU|MAXMEMORY_FLAG_LFU) /* 非共享数字: 0011 */
 
 #define MAXMEMORY_VOLATILE_LRU ((0<<8)|MAXMEMORY_FLAG_LRU)
 #define MAXMEMORY_VOLATILE_LFU ((1<<8)|MAXMEMORY_FLAG_LFU)
@@ -568,17 +569,16 @@ typedef enum {
 #define MAXMEMORY_ALLKEYS_RANDOM ((6<<8)|MAXMEMORY_FLAG_ALLKEYS)
 #define MAXMEMORY_NO_EVICTION (7<<8)
 
-/* Units */
-#define UNIT_SECONDS 0
-#define UNIT_MILLISECONDS 1
+/* 时间单位，可以用于key的过期时间 */
+#define UNIT_SECONDS 0      /* 秒 */
+#define UNIT_MILLISECONDS 1 /* 毫秒 */
 
-/* SHUTDOWN flags */
-#define SHUTDOWN_NOFLAGS 0      /* No flags. */
-#define SHUTDOWN_SAVE 1         /* Force SAVE on SHUTDOWN even if no save
-                                   points are configured. */
-#define SHUTDOWN_NOSAVE 2       /* Don't SAVE on SHUTDOWN. */
-#define SHUTDOWN_NOW 4          /* Don't wait for replicas to catch up. */
-#define SHUTDOWN_FORCE 8        /* Don't let errors prevent shutdown. */
+/* 关闭标识 */
+#define SHUTDOWN_NOFLAGS 0      /* 无任何标识 */
+#define SHUTDOWN_SAVE 1         /* 在关机时强制执行SAVE命令，即使未配置保存点 */
+#define SHUTDOWN_NOSAVE 2       /* 关机时不执行SAVE命令 */
+#define SHUTDOWN_NOW 4          /* 不要等待slave赶上来，即立刻关机 */
+#define SHUTDOWN_FORCE 8        /* 强制关闭，出现任何错误都忽略 */
 
 /* Command call flags, see call() function */
 #define CMD_CALL_NONE 0
@@ -966,23 +966,22 @@ typedef struct replBufBlock {
     char buf[];
 } replBufBlock;
 
-/* Redis database representation. There are multiple databases identified
- * by integers from 0 (the default database) up to the max configured
- * database. The database number is the 'id' field in the structure. */
+/**
+ * 代表Redis数据库的。存在从0开始到配置的最大值的多个数据库。
+ * 数据库编号是该结构中的'id'字段。
+ */
 typedef struct redisDb {
-    kvstore *keys;              /* The keyspace for this DB */
-    kvstore *expires;           /* Timeout of keys with a timeout set */
-    ebuckets hexpires;          /* Hash expiration DS. Single TTL per hash (of next min field to expire) */
-    dict *blocking_keys;        /* Keys with clients waiting for data (BLPOP)*/
-    dict *blocking_keys_unblock_on_nokey;   /* Keys with clients waiting for
-                                             * data, and should be unblocked if key is deleted (XREADEDGROUP).
-                                             * This is a subset of blocking_keys*/
-    dict *ready_keys;           /* Blocked keys that received a PUSH */
+    kvstore *keys;              /* 用于保存数据库中的所有的键 */
+    kvstore *expires;           /* 设置了超时的键集合 */
+    ebuckets hexpires;          /* 哈希过期DS。每个哈希都有一个TTL（下一个最短过期字段） */
+    dict *blocking_keys;        /* 客户端正在等待的key集合（BLPOP）*/
+    dict *blocking_keys_unblock_on_nokey;   /* 客户端正在等待的key的集合，如果key被删除，应该被解锁 (XREADEDGROUP)，这是 blocking_keys 的子集 */
+    dict *ready_keys;           /* 收到PUSH的被阻塞的key的集合 */
     dict *watched_keys;         /* WATCHED keys for MULTI/EXEC CAS */
-    int id;                     /* Database ID */
-    long long avg_ttl;          /* Average TTL, just for stats */
-    unsigned long expires_cursor; /* Cursor of the active expire cycle. */
-    list *defrag_later;         /* List of key names to attempt to defrag one by one, gradually. */
+    int id;                     /* 数据库ID */
+    long long avg_ttl;          /* 平均的TTL，仅用于统计信息 */
+    unsigned long expires_cursor; /* 用于活跃过期环的游标 */
+    list *defrag_later;         /* 用于尝试逐一进行碎片整理的关键名称列表 */
 } redisDb;
 
 /* forward declaration for functions ctx */
@@ -1549,12 +1548,12 @@ typedef enum childInfoType {
 } childInfoType;
 
 struct redisServer {
-    /* General */
-    pid_t pid;                  /* Main process pid. */
-    pthread_t main_thread_id;         /* Main thread id */
-    char *configfile;           /* Absolute config file path, or NULL */
-    char *executable;           /* Absolute executable file path. */
-    char **exec_argv;           /* Executable argv vector (copy). */
+    /* 通用 */
+    pid_t pid;                  /* 主进程的pid */
+    pthread_t main_thread_id;         /* 主线程id */
+    char *configfile;           /* 配置文件的绝对路径或NULL */
+    char *executable;           /* 可执行文件的绝对路径 */
+    char **exec_argv;           /* 可执行参数向量 (副本) */
     int dynamic_hz;             /* Change hz value depending on # of clients. */
     int config_hz;              /* Configured HZ value. May be different than
                                    the actual 'hz' field value if dynamic-hz
@@ -1599,25 +1598,25 @@ struct redisServer {
     pid_t child_pid;            /* PID of current child */
     int child_type;             /* Type of current child */
     redisAtomic int module_gil_acquring; /* Indicates whether the GIL is being acquiring by the main thread. */
-    /* Networking */
-    int port;                   /* TCP listening port */
-    int tls_port;               /* TLS listening port */
-    int tcp_backlog;            /* TCP listen() backlog */
-    char *bindaddr[CONFIG_BINDADDR_MAX]; /* Addresses we should bind to */
-    int bindaddr_count;         /* Number of addresses in server.bindaddr[] */
-    char *bind_source_addr;     /* Source address to bind on for outgoing connections */
-    char *unixsocket;           /* UNIX socket path */
-    unsigned int unixsocketperm; /* UNIX socket permission (see mode_t) */
-    connListener listeners[CONN_TYPE_MAX]; /* TCP/Unix/TLS even more types */
-    uint32_t socket_mark_id;    /* ID for listen socket marking */
-    connListener clistener;     /* Cluster bus listener */
-    list *clients;              /* List of active clients */
-    list *clients_to_close;     /* Clients to close asynchronously */
-    list *clients_pending_write; /* There is to write or install handler. */
-    list *clients_pending_read;  /* Client has pending read socket buffers. */
-    list *slaves, *monitors;    /* List of slaves and MONITORs */
-    client *current_client;     /* The client that triggered the command execution (External or AOF). */
-    client *executing_client;   /* The client executing the current command (possibly script or module). */
+    /* 网络 */
+    int port;                   /* TCP 监听的端口 */
+    int tls_port;               /* TLS 监听的端口 */
+    int tcp_backlog;            /* TCP listen() 积压 */
+    char *bindaddr[CONFIG_BINDADDR_MAX]; /* 我们应该绑定的地址列表 */
+    int bindaddr_count;         /* 在server.bindaddr[]中的地址列表数量 */
+    char *bind_source_addr;     /* 绑定传出链接的源地址 */
+    char *unixsocket;           /* UNIX socket 路径 */
+    unsigned int unixsocketperm; /* UNIX socket 权限 (see mode_t) */
+    connListener listeners[CONN_TYPE_MAX]; /* TCP/Unix/TLS 甚至更多类型 */
+    uint32_t socket_mark_id;    /* 监听socket标记的ID */
+    connListener clistener;     /* 集群总线监听器 */
+    list *clients;              /* 活跃的客户端列表 */
+    list *clients_to_close;     /* 异步关闭的客户端列表 */
+    list *clients_pending_write; /* 有需要write或install的处理程序 */
+    list *clients_pending_read;  /* 客户端有待处理的读取socket缓冲区 */
+    list *slaves, *monitors;    /* slave和monitor列表 */
+    client *current_client;     /* 触发命令执行的客户端（外部或AOF） */
+    client *executing_client;   /* 执行当前命令的客户端（script或module） */
 
 #ifdef LOG_REQ_RES
     char *req_res_logfile; /* Path of log file for logging all requests and their replies. If NULL, no logging will be performed */
@@ -1868,11 +1867,11 @@ struct redisServer {
     int shutdown_on_sigint;         /* Shutdown flags configured for SIGINT. */
     int shutdown_on_sigterm;        /* Shutdown flags configured for SIGTERM. */
 
-    /* Replication (master) */
-    char replid[CONFIG_RUN_ID_SIZE+1];  /* My current replication ID. */
-    char replid2[CONFIG_RUN_ID_SIZE+1]; /* replid inherited from master*/
-    long long master_repl_offset;   /* My current replication offset */
-    long long second_replid_offset; /* Accept offsets up to this for replid2. */
+    /* 复制(master) */
+    char replid[CONFIG_RUN_ID_SIZE+1];  /* 当前副本ID */
+    char replid2[CONFIG_RUN_ID_SIZE+1]; /* 继承自master的副本ID */
+    long long master_repl_offset;   /* 当前副本偏移量 */
+    long long second_replid_offset; /* 接受replids的最高偏移量 */
     redisAtomic long long fsynced_reploff_pending;/* Largest replication offset to
                                      * potentially have been fsynced, applied to
                                        fsynced_reploff only when AOF state is AOF_ON
@@ -1898,32 +1897,32 @@ struct redisServer {
     size_t repl_buffer_mem;         /* The memory of replication buffer. */
     list *repl_buffer_blocks;       /* Replication buffers blocks list
                                      * (serving replica clients and repl backlog) */
-    /* Replication (slave) */
-    char *masteruser;               /* AUTH with this user and masterauth with master */
-    sds masterauth;                 /* AUTH with this password with master */
-    char *masterhost;               /* Hostname of master */
-    int masterport;                 /* Port of master */
-    int repl_timeout;               /* Timeout after N seconds of master idle */
-    client *master;     /* Client that is master for this slave */
-    client *cached_master; /* Cached master to be reused for PSYNC. */
-    int repl_syncio_timeout; /* Timeout for synchronous I/O calls */
-    int repl_state;          /* Replication status if the instance is a slave */
-    off_t repl_transfer_size; /* Size of RDB to read from master during sync. */
-    off_t repl_transfer_read; /* Amount of RDB read from master during sync. */
-    off_t repl_transfer_last_fsync_off; /* Offset when we fsync-ed last time. */
-    connection *repl_transfer_s;     /* Slave -> Master SYNC connection */
-    int repl_transfer_fd;    /* Slave -> Master SYNC temp file descriptor */
-    char *repl_transfer_tmpfile; /* Slave-> master SYNC temp file name */
-    time_t repl_transfer_lastio; /* Unix time of the latest read, for timeout */
-    int repl_serve_stale_data; /* Serve stale data when link is down? */
-    int repl_slave_ro;          /* Slave is read only? */
-    int repl_slave_ignore_maxmemory;    /* If true slaves do not evict. */
-    time_t repl_down_since; /* Unix time at which link with master went down */
-    int repl_disable_tcp_nodelay;   /* Disable TCP_NODELAY after SYNC? */
-    int slave_priority;             /* Reported in INFO and used by Sentinel. */
-    int replica_announced;          /* If true, replica is announced by Sentinel */
-    int slave_announce_port;        /* Give the master this listening port. */
-    char *slave_announce_ip;        /* Give the master this ip address. */
+    /* 复制（slave） */
+    char *masteruser;               /* 使用此用户向master进行身份认证 */
+    sds masterauth;                 /* 使用此密码向master进行身份认证 */
+    char *masterhost;               /* master的主机名称 */
+    int masterport;                 /* master的端口 */
+    int repl_timeout;               /* master空闲多少秒后超时 */
+    client *master;     /* 作为该slave的master客户端 */
+    client *cached_master; /* 被PSYNC复用的缓存的master客户端 */
+    int repl_syncio_timeout; /* 同步I/O调用的超时时间 */
+    int repl_state;          /* 如果当前实例为Slave时，表示其复制状态 */
+    off_t repl_transfer_size; /* 在同步期间，从master读取的RDB的大小 */
+    off_t repl_transfer_read; /* 在同步期间，从master读取的RDB数量 */
+    off_t repl_transfer_last_fsync_off; /* 上次执行完 fsync 的偏移量 */
+    connection *repl_transfer_s;     /* 从Slave -> Master 的同步链接 */
+    int repl_transfer_fd;    /* 从Slave -> Master 同步的临时文件描述符 */
+    char *repl_transfer_tmpfile; /* 从Slave -> Master 同步的临时文件名称 */
+    time_t repl_transfer_lastio; /* 最新读的unix时间，用于计算超时 */
+    int repl_serve_stale_data; /* 当链接断开时，是否提供过时的数据 */
+    int repl_slave_ro;          /* Slave 是否只读 */
+    int repl_slave_ignore_maxmemory;    /* 如果为true，则Slave不会因为内存满了而驱逐键 */
+    time_t repl_down_since; /* 与master链接断开的unix时间 */
+    int repl_disable_tcp_nodelay;   /* 在同步之后是否禁用 TCP_NODELAY */
+    int slave_priority;             /* 以INFO级别上报，并被Sentinel所使用 */
+    int replica_announced;          /* 如果为true，由Sentinel宣布副本 */
+    int slave_announce_port;        /* 提供给Master这个监听端口 */
+    char *slave_announce_ip;        /* 提供给Master这个ip地址 */
     int propagation_error_behavior; /* Configures the behavior of the replica
                                      * when it receives an error on the replication stream */
     int repl_ignore_disk_write_error;   /* Configures whether replicas panic when unable to
@@ -1941,8 +1940,8 @@ struct redisServer {
     unsigned int maxclients;            /* Max number of simultaneous clients */
     unsigned long long maxmemory;   /* Max number of memory bytes to use */
     ssize_t maxmemory_clients;       /* Memory limit for total client buffers */
-    int maxmemory_policy;           /* Policy for key eviction */
-    int maxmemory_samples;          /* Precision of random sampling */
+    int maxmemory_policy;           /* 用于当存储达到最大内存时，key的驱逐策略 */
+    int maxmemory_samples;          /* 随机取样精度 */
     int maxmemory_eviction_tenacity;/* Aggressiveness of eviction processing */
     int lfu_log_factor;             /* LFU logarithmic counter factor. */
     int lfu_decay_time;             /* LFU counter decay factor. */
@@ -3371,23 +3370,37 @@ robj *objectCommandLookup(client *c, robj *key);
 robj *objectCommandLookupOrReply(client *c, robj *key, robj *reply);
 int objectSetLRUOrLFU(robj *val, long long lfu_freq, long long lru_idle,
                        long long lru_clock, int lru_multiplier);
-#define LOOKUP_NONE 0
-#define LOOKUP_NOTOUCH (1<<0)  /* Don't update LRU. */
-#define LOOKUP_NONOTIFY (1<<1) /* Don't trigger keyspace event on key misses. */
-#define LOOKUP_NOSTATS (1<<2)  /* Don't update keyspace hits/misses counters. */
-#define LOOKUP_WRITE (1<<3)    /* Delete expired keys even in replicas. */
-#define LOOKUP_NOEXPIRE (1<<4) /* Avoid deleting lazy expired keys. */
-#define LOOKUP_NOEFFECTS (LOOKUP_NONOTIFY | LOOKUP_NOSTATS | LOOKUP_NOTOUCH | LOOKUP_NOEXPIRE) /* Avoid any effects from fetching the key */
+
+/**
+ * 查找键时的行为标志。
+ * 
+ * 请注意：对于LOOKUP_WRITE标识，配置了!LOOKUP_NOSTATS是没有意义的，
+ * 因为过期键将被删除，对应的统计信息也将被删除。
+ * 
+ * 
+ * +-----------+----------+-------+---------+----------+---------+
+ * | NOEFFECTS | NOEXPIRE | WRITE | NOSTATS | NONOTIFY | NOTOUCH |
+ * +-----------+----------+-------+---------+----------+---------+
+ * |         1 |        1 |     1 |       1 |        1 |       1 |
+ * +-----------+----------+-------+---------+----------+---------+
+ */
+#define LOOKUP_NONE 0          /* 没有任何标识，匹配到键时，更新LRU；如果已过期，则删除；更新命中或缺失的计数器；如果未命中，则触发keyspace事件 */
+#define LOOKUP_NOTOUCH (1<<0)  /* 不要更新LRU（Least Recent Usgae） */
+#define LOOKUP_NONOTIFY (1<<1) /* 在键未命中时，不要触发keyspace事件 */
+#define LOOKUP_NOSTATS (1<<2)  /* 不要更新keyspace hits/misses的计数器 */
+#define LOOKUP_WRITE (1<<3)    /* 删除master和replicas中的过期键 */
+#define LOOKUP_NOEXPIRE (1<<4) /* 避免删除懒过期的key */
+#define LOOKUP_NOEFFECTS (LOOKUP_NONOTIFY | LOOKUP_NOSTATS | LOOKUP_NOTOUCH | LOOKUP_NOEXPIRE) /* 避免获取键所有产生的影响 */
 
 dictEntry *dbAdd(redisDb *db, robj *key, robj *val);
 int dbAddRDBLoad(redisDb *db, sds key, robj *val);
 void dbReplaceValue(redisDb *db, robj *key, robj *val);
 
-#define SETKEY_KEEPTTL 1
+#define SETKEY_KEEPTTL 1        /* 用于SET命令，保留过期时间 */
 #define SETKEY_NO_SIGNAL 2
-#define SETKEY_ALREADY_EXIST 4
-#define SETKEY_DOESNT_EXIST 8
-#define SETKEY_ADD_OR_UPDATE 16 /* Key most likely doesn't exists */
+#define SETKEY_ALREADY_EXIST 4  /* 用于SET命令，表示key已经存在 */
+#define SETKEY_DOESNT_EXIST 8   /* 用于SET命令，表示key上不存在 */
+#define SETKEY_ADD_OR_UPDATE 16 /* key 很有可能不存在 */
 void setKey(client *c, redisDb *db, robj *key, robj *val, int flags);
 robj *dbRandomKey(redisDb *db);
 int dbGenericDelete(redisDb *db, robj *key, int async, int flags);

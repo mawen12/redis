@@ -165,7 +165,9 @@ static inline dictEntryNoValue *decodeEntryNoValue(const dictEntry *de) {
     return decodeMaskedPtr(de);
 }
 
-/* Returns 1 if the entry has a value field and 0 otherwise. */
+/**
+ * 如果条目中存在值，则返回1；否则返回0
+ */
 static inline int entryHasValue(const dictEntry *de) {
     return entryIsNormal(de);
 }
@@ -479,33 +481,35 @@ int dictAdd(dict *d, void *key, void *val)
     return DICT_OK;
 }
 
-/* Low level add or find:
- * This function adds the entry but instead of setting a value returns the
- * dictEntry structure to the user, that will make sure to fill the value
- * field as they wish.
- *
- * This function is also directly exposed to the user API to be called
- * mainly in order to store non-pointers inside the hash value, example:
- *
- * entry = dictAddRaw(dict,mykey,NULL);
- * if (entry != NULL) dictSetSignedIntegerVal(entry,1000);
- *
- * Return values:
- *
- * If key already exists NULL is returned, and "*existing" is populated
- * with the existing entry if existing is not NULL.
- *
- * If key was added, the hash entry is returned to be manipulated by the caller.
+/**
+ * 低级的添加或查找操作：
+ * 该参数添加条目，但不是设置值，而是将dictEntry结构返回给用户，
+ * 以确保根据用户的意愿填充值。
+ * 
+ * 该函数直接暴露给用户API来调用，主要是为了在哈希值中存储非指针，例如：
+ * 
+ * entry = dictAddRaw(dict, mykey, NULL);
+ * if (entry != NULL) dictSetSignedIntegerVal(entry, 1000);
+ * 
+ * 返回值：
+ * 
+ * 如果key已经存在，则返回NULL，并且 existing 不为空时被填充已存在的条目。
+ * 
+ * 如果key被添加成功，返回受调用者空值的哈希条目。
+ * 
+ * d: kvstore 中存储的条目
+ * key: 键
+ * existing: 存在的条目
  */
-dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing)
-{
-    /* Get the position for the new key or NULL if the key already exists. */
+dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing) {
+    // 返回新key的位置，如果已存在则返回NULL
     void *position = dictFindPositionForInsert(d, key, existing);
     if (!position) return NULL;
 
-    /* Dup the key if necessary. */
+    // 在需要时复制key
     if (d->type->keyDup) key = d->type->keyDup(d, key);
 
+    // 将key插入到条目的指定位置
     return dictInsertAtPosition(d, key, position);
 }
 
@@ -1568,10 +1572,10 @@ static signed char _dictNextExp(unsigned long size)
     return 8*sizeof(long) - __builtin_clzl(size-1);
 }
 
-/* Finds and returns the position within the dict where the provided key should
- * be inserted using dictInsertAtPosition if the key does not already exist in
- * the dict. If the key exists in the dict, NULL is returned and the optional
- * 'existing' entry pointer is populated, if provided. */
+/**
+ * 查找并返回所提供的key应当插入字典中的位置，如果key尚不存在于字典中时。
+ * 如果key已经存在于字段中，将返回NULL，并使用条目指针填充 existing 参数。
+ */
 void *dictFindPositionForInsert(dict *d, const void *key, dictEntry **existing) {
     unsigned long idx, table;
     dictEntry *he;

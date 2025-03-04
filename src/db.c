@@ -21,24 +21,26 @@
  * C-level DB API
  *----------------------------------------------------------------------------*/
 
-/* Flags for expireIfNeeded */
-#define EXPIRE_FORCE_DELETE_EXPIRED 1
-#define EXPIRE_AVOID_DELETE_EXPIRED 2
+/* 如果需要则过期的标识 */
+#define EXPIRE_FORCE_DELETE_EXPIRED 1 /* 强制删除过期键，用于只读副本 */
+#define EXPIRE_AVOID_DELETE_EXPIRED 2 /* 避免删除过期键，用于可写副本 */
 
-/* Return values for expireIfNeeded */
+/* 返回用于如果需要则过期的标识的值 */
 typedef enum {
-    KEY_VALID = 0, /* Could be volatile and not yet expired, non-volatile, or even non-existing key. */
-    KEY_EXPIRED, /* Logically expired but not yet deleted. */
-    KEY_DELETED /* The key was deleted now. */
+    KEY_VALID = 0, /* 可以是volatie且不需要过期，non-volatile，或甚至不存在的key */
+    KEY_EXPIRED, /* 逻辑上过期，但是尚未被删除 */
+    KEY_DELETED /* key已被删除 */
 } keyStatus;
 
 keyStatus expireIfNeeded(redisDb *db, robj *key, int flags);
 int keyIsExpired(redisDb *db, robj *key);
 static void dbSetValue(redisDb *db, robj *key, robj *val, int overwrite, dictEntry *de);
 
-/* Update LFU when an object is accessed.
- * Firstly, decrement the counter if the decrement time is reached.
- * Then logarithmically increment the counter, and update the access time. */
+/**
+ * 当一个Redis对象被访问时，更新LFU。
+ * 首先，如果到达了减量时间，则减少计数器，
+ * 然后以对数方式增加计数器，并更新访问时间
+ */
 void updateLFU(robj *val) {
     unsigned long counter = LFUDecrAndReturn(val);
     counter = LFULogIncr(counter);
@@ -71,53 +73,67 @@ void updateLFU(robj *val) {
  *      master通过replication链接中的DEL使密钥过期滞后。
  */
 robj *lookupKey(redisDb *db, robj *key, int flags) {
-    // 
+    // 根据key从指定db查找条目
     dictEntry *de = dbFind(db, key->ptr);
     robj *val = NULL;
     if (de) {
+        // 从条目中提取值
         val = dictGetVal(de);
-        /* Forcing deletion of expired keys on a replica makes the replica
-         * inconsistent with the master. We forbid it on readonly replicas, but
-         * we have to allow it on writable replicas to make write commands
-         * behave consistently.
-         *
-         * It's possible that the WRITE flag is set even during a readonly
-         * command, since the command may trigger events that cause modules to
-         * perform additional writes. */
-        int is_ro_replica = server.masterhost && server.repl_slave_ro;
+        /**
+         * 强制删除副本上的过期key会导致副本与master不一致。
+         * 我们禁止在只读副本上执行此操作，但我们必须在可写副本上执行此操作，
+         * 以使写入命令的行为一致。
+         * 
+         * 即使在只读命令期间也有可能设置 WRITE 标识，因为命令可能触发引起
+         * 模块执行额外写的事件。
+         */
+        int is_ro_replica = server.masterhost && server.repl_slave_ro; /* 存在master主机，且为只读副本 */
         int expire_flags = 0;
+
+        
         if (flags & LOOKUP_WRITE && !is_ro_replica)
+            // 可写标识，且非只读副本时，设置强制删除过期key
             expire_flags |= EXPIRE_FORCE_DELETE_EXPIRED;
         if (flags & LOOKUP_NOEXPIRE)
+            // 不允许删除过期标识时，设置避免删除过期key
             expire_flags |= EXPIRE_AVOID_DELETE_EXPIRED;
         if (expireIfNeeded(db, key, expire_flags) != KEY_VALID) {
-            /* The key is no longer valid. */
+            // 对于已删除或已过期的key，视为不再合法，将其值置为NULL
             val = NULL;
         }
     }
 
     if (val) {
-        /* Update the access time for the ageing algorithm.
-         * Don't do it if we have a saving child, as this will trigger
-         * a copy on write madness. */
+        /**
+         * 更新用于老化算法的访问时间
+         * 如果有一个正在保存的子进程，不要这样做，因为这样会触发写入疯狂的复制
+         */
         if (server.current_client && server.current_client->flags & CLIENT_NO_TOUCH &&
             server.current_client->cmd->proc != touchCommand)
+            // 当前客户端设置了不更新LFU和LRU统计信息，且该客户端并未执行touch命令，则设置不更新LRU
             flags |= LOOKUP_NOTOUCH;
         if (!hasActiveChildProcess() && !(flags & LOOKUP_NOTOUCH)){
+            // 不存在活跃的子进程，且允许更新LRU
             if (server.maxmemory_policy & MAXMEMORY_FLAG_LFU) {
+                // 使用了LFU作为老化算法，对key进行驱逐，则更新该key的LFU
                 updateLFU(val);
             } else {
+                // 没有使用LRU，默认更新LRU
                 val->lru = LRU_CLOCK();
             }
         }
+        
 
         if (!(flags & (LOOKUP_NOSTATS | LOOKUP_WRITE)))
+            // 如果未配置删除过期键，且允许记录统计信息，则增加hits计数器
             server.stat_keyspace_hits++;
         /* TODO: Use separate hits stats for WRITE */
     } else {
         if (!(flags & (LOOKUP_NONOTIFY | LOOKUP_WRITE)))
+            // 对于如果未配置删除过期键，且允许记录统计信息，但是key miss，则发送keyspace事件
             notifyKeyspaceEvent(NOTIFY_KEY_MISS, "keymiss", key, db->id);
         if (!(flags & (LOOKUP_NOSTATS | LOOKUP_WRITE)))
+            // 对于如果未配置删除过期键，且允许记录统计信息，但是key miss，则增加misses计数器
             server.stat_keyspace_misses++;
         /* TODO: Use separate misses stats and notify event for WRITE */
     }
@@ -171,14 +187,22 @@ robj *lookupKeyWriteOrReply(client *c, robj *key, robj *reply) {
     return o;
 }
 
-/* Add the key to the DB. It's up to the caller to increment the reference
- * counter of the value if needed.
- *
- * If the update_if_existing argument is false, the program is aborted
- * if the key already exists, otherwise, it can fall back to dbOverwrite. */
+/**
+ * 将key添加到Db，如果需要，调用者可以自行增加该值的引用计数器
+ * 
+ * 如果key已经存在且 update_if_existing 为false，程序将被中止；
+ * 否则，该key将被覆盖。
+ * 
+ * db: 保存key的数据库
+ * key: 键
+ * val: 值
+ * update_if_existing: 如果为false，且key存在，则中止程序；否则更新或添加
+ */
 static dictEntry *dbAddInternal(redisDb *db, robj *key, robj *val, int update_if_existing) {
     dictEntry *existing;
+    // 根据key的哈希值计算槽Id
     int slot = getKeySlot(key->ptr);
+    // 
     dictEntry *de = kvstoreDictAddRaw(db->keys, slot, key->ptr, &existing);
     if (update_if_existing && existing) {
         dbSetValue(db, key, val, 1, existing);
@@ -193,6 +217,13 @@ static dictEntry *dbAddInternal(redisDb *db, robj *key, robj *val, int update_if
     return de;
 }
 
+/**
+ * 向Db中添加键和值
+ * 
+ * db: 保存key和val的数据库
+ * key: 键
+ * val: 值
+ */
 dictEntry *dbAdd(redisDb *db, robj *key, robj *val) {
     return dbAddInternal(db, key, val, 0);
 }
@@ -297,38 +328,48 @@ void dbReplaceValue(redisDb *db, robj *key, robj *val) {
     dbSetValue(db, key, val, 0, NULL);
 }
 
-/* High level Set operation. This function can be used in order to set
- * a key, whatever it was existing or not, to a new object.
- *
- * 1) The ref count of the value object is incremented.
- * 2) clients WATCHing for the destination key notified.
- * 3) The expire time of the key is reset (the key is made persistent),
- *    unless 'SETKEY_KEEPTTL' is enabled in flags.
- * 4) The key lookup can take place outside this interface outcome will be
- *    delivered with 'SETKEY_ALREADY_EXIST' or 'SETKEY_DOESNT_EXIST'
- *
- * All the new keys in the database should be created via this interface.
- * The client 'c' argument may be set to NULL if the operation is performed
- * in a context where there is no clear client performing the operation. */
+/**
+ * 高级的Set操作，该函数被用于设置一个key，无论其是否存在，都会指向一个新对象。
+ * 
+ * 1）该值对象的引用计数增加
+ * 2）WATCH该key的客户端将被通知
+ * 3）重置该key的过期时间（key变为持久化），除非带有SETKEY_KEEPTTL的标识
+ * 4）key的查找可以在此接口之外进行，结果将通过 SETKEY_ALREADY_EXIST 或
+ *      SETKEY_DOESNT_EXIST 传递。
+ * 
+ * 在该数据库中应该通过该接口来创建所有的新keys。
+ * 如果被执行的操作位于上下文中，没有明确的客户端执行该操作，那么参数 'c'
+ * 便可以为NULL
+ */
 void setKey(client *c, redisDb *db, robj *key, robj *val, int flags) {
     int keyfound = 0;
 
     if (flags & SETKEY_ALREADY_EXIST)
+        // 代表key已存在
         keyfound = 1;
     else if (flags & SETKEY_ADD_OR_UPDATE)
+        // 代表新增或更新，即key很可能不存在
         keyfound = -1;
     else if (!(flags & SETKEY_DOESNT_EXIST))
+        // 当key未明确不存在时，再次查找
         keyfound = (lookupKeyWrite(db,key) != NULL);
 
     if (!keyfound) {
+        // key 不存在时，执行添加操作，写入DB
         dbAdd(db,key,val);
     } else if (keyfound<0) {
+        // key 未新增或更新时，使用内部方法添加
         dbAddInternal(db,key,val,1);
     } else {
+        // key存在，仅更新值
         dbSetValue(db,key,val,1,NULL);
     }
+
+    // 该值对象的引用计数+1
     incrRefCount(val);
+    // 对于非expire的标识，重置该key的过期时间，将其变为持久化
     if (!(flags & SETKEY_KEEPTTL)) removeExpire(db,key);
+    // 对于开启通知的key，WATCH该key的客户端将被通知
     if (!(flags & SETKEY_NO_SIGNAL)) signalModifiedKey(c,db,key);
 }
 

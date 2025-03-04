@@ -208,16 +208,18 @@ long long ustime(void) {
     return ust;
 }
 
-/* Return the UNIX time in milliseconds */
+/**
+ * 返回毫秒的UNIX时间戳
+ */
 mstime_t mstime(void) {
     return ustime()/1000;
 }
 
-/* Return the command time snapshot in milliseconds.
- * The time the command started is the logical time it runs,
- * and all the time readings during the execution time should
- * reflect the same time.
- * More details can be found in the comments below. */
+/**
+ * 返回毫秒的命令时间镜像。
+ * 命令启动时间是其逻辑时间，并且执行期间的所有时间读数应该
+ * 反应相同的时间，更多详细信息可以在以下评论中找到。
+ */
 mstime_t commandTimeSnapshot(void) {
     /* When we are in the middle of a command execution, we want to use a
      * reference time that does not change: in that case we just use the

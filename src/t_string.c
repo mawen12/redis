@@ -30,64 +30,81 @@ static int checkStringLength(client *c, long long size, long long append) {
     return C_OK;
 }
 
-/* The setGenericCommand() function implements the SET operation with different
- * options and variants. This function is called in order to implement the
- * following commands: SET, SETEX, PSETEX, SETNX, GETSET.
- *
- * 'flags' changes the behavior of the command (NX, XX or GET, see below).
- *
- * 'expire' represents an expire to set in form of a Redis object as passed
- * by the user. It is interpreted according to the specified 'unit'.
- *
- * 'ok_reply' and 'abort_reply' is what the function will reply to the client
- * if the operation is performed, or when it is not because of NX or
- * XX flags.
- *
- * If ok_reply is NULL "+OK" is used.
- * If abort_reply is NULL, "$-1" is used. */
-
-#define OBJ_NO_FLAGS 0
-#define OBJ_SET_NX (1<<0)          /* Set if key not exists. */
-#define OBJ_SET_XX (1<<1)          /* Set if key exists. */
-#define OBJ_EX (1<<2)              /* Set if time in seconds is given */
-#define OBJ_PX (1<<3)              /* Set if time in ms in given */
-#define OBJ_KEEPTTL (1<<4)         /* Set and keep the ttl */
-#define OBJ_SET_GET (1<<5)         /* Set if want to get key before set */
-#define OBJ_EXAT (1<<6)            /* Set if timestamp in second is given */
-#define OBJ_PXAT (1<<7)            /* Set if timestamp in ms is given */
-#define OBJ_PERSIST (1<<8)         /* Set if we need to remove the ttl */
+/**
+ * setGenericCommand() 函数实现了带有不同选项和变体的SET操作。
+ * 该函数被调用是为了实现以下命令：SET, SETNX, PSETEX, SETNX, GETSET。
+ * 
+ * 'flags' 修改了命令（NX, XX or GET）的行为
+ * 
+ * 'expire' 代表以用户传递的Redis对象形式设置的过期时间。
+ * 它根据指定的'unit'进行解释。
+ * 
+ * 'ok_reply' 和 'abort_reply' 是函数操作执行后（或因为NX/XX而未执行）返回给客户端的答复。
+ * 
+ * 如果 ok_reply 为空，则会使用 "+OK"。
+ * 如果 abort_reply 为空，则会使用 "$-1"。
+ * 
+ * 原始的命令格式为：SET key value [NX | XX] [GET] [EX seconds | PX milliseconds | EXAT unix-time-seconds | PXAT unix-time-milliseconds | KEEPTTL]
+ * 
+ * 
+ * +---------+------+------+---------+---------+----+----+----+----+
+ * | PERSIST | PXAT | EXAT | SET_GET | KEEPTTL | PX | EX | XX | NX |
+ * +---------+------+------+---------+---------+----+----+----+----+
+ * |       1 |    1 |    1 |       1 |       1 |  1 |  1 |  1 |  1 |
+ * +---------+------+------+---------+---------+----+----+----+----+
+ */
+#define OBJ_NO_FLAGS 0             /* 没有任何表示，就是简单的 SET key value */
+#define OBJ_SET_NX (1<<0)          /* KEY必须不存在，即 SET key value NX */
+#define OBJ_SET_XX (1<<1)          /* KEY必须已存在，即 SET key value XX */
+#define OBJ_EX (1<<2)              /* 过期时间为秒，即 SET key value EX <seconds> */
+#define OBJ_PX (1<<3)              /* 过期时间为毫秒，即 SET key value PX <milliseconds> */
+#define OBJ_KEEPTTL (1<<4)         /* 保留TTL，即 SET key value KEEPTTL */
+#define OBJ_SET_GET (1<<5)         /* 设置前返回之前值，即 SET key value GET */
+#define OBJ_EXAT (1<<6)            /* 设置过期时间为unix-time秒，即 SET key value EXAT unix-time-seconds */
+#define OBJ_PXAT (1<<7)            /* 设置过期时间为unix-time毫秒，即 SET key value PXAT unix-time-milliseconds */
+#define OBJ_PERSIST (1<<8)         /* 设置持久保存，异常过期，即 SET key value PERSIST */
 
 /* Forward declaration */
 static int getExpireMillisecondsOrReply(client *c, robj *expire, int flags, int unit, long long *milliseconds);
 
+/**
+ * 通用的SET命令
+ */
 void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire, int unit, robj *ok_reply, robj *abort_reply) {
     long long milliseconds = 0; /* initialized to avoid any harmness warning */
     int found = 0;
     int setkey_flags = 0;
-
+    
+    // 设置了过期，计算过期的绝对时间戳，保存到"millseconds"
     if (expire && getExpireMillisecondsOrReply(c, expire, flags, unit, &milliseconds) != C_OK) {
         return;
     }
 
+    // 命令为SET key value GET
     if (flags & OBJ_SET_GET) {
+        // 如果GET操作因为键类型不匹配，则直接返回
         if (getGenericCommand(c) == C_ERR) return;
     }
 
+    // 查找结果
     found = (lookupKeyWrite(c->db,key) != NULL);
 
     if ((flags & OBJ_SET_NX && found) ||
         (flags & OBJ_SET_XX && !found))
     {
+        // 命令为SET key value NX，且Key已经存在，或命令为SET key value XX，且key不存在时的处理
         if (!(flags & OBJ_SET_GET)) {
+            // 命令不是 SET key value GET时，添加回复。
             addReply(c, abort_reply ? abort_reply : shared.null[c->resp]);
         }
         return;
     }
 
-    /* When expire is not NULL, we avoid deleting the TTL so it can be updated later instead of being deleted and then created again. */
+    // 如果设置了 expire，我们应该避免删除TTL以便之后能够更新，而不是先删除再创建
     setkey_flags |= ((flags & OBJ_KEEPTTL) || expire) ? SETKEY_KEEPTTL : 0;
+    // 根据是否找到key，则设置对应标识
     setkey_flags |= found ? SETKEY_ALREADY_EXIST : SETKEY_DOESNT_EXIST;
-
+    // 
     setKey(c,c->db,key,val,setkey_flags);
     server.dirty++;
     notifyKeyspaceEvent(NOTIFY_STRING,"set",key,c->db->id);
@@ -128,36 +145,41 @@ void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire,
     }
 }
 
-/*
- * Extract the `expire` argument of a given GET/SET command as an absolute timestamp in milliseconds.
- *
- * "client" is the client that sent the `expire` argument.
- * "expire" is the `expire` argument to be extracted.
- * "flags" represents the behavior of the command (e.g. PX or EX).
- * "unit" is the original unit of the given `expire` argument (e.g. UNIT_SECONDS).
- * "milliseconds" is output argument.
- *
- * If return C_OK, "milliseconds" output argument will be set to the resulting absolute timestamp.
- * If return C_ERR, an error reply has been added to the given client.
+/**
+ * 提取给定的SET/GET命令中的expire相关参数（EX/PX/EXAT/PXAT）
+ * 
+ * "client" 发送expire参数的客户端
+ * "expire" 被解析的expire参数
+ * "flags" 代表命令的行为（EX/PX）
+ * "unit" 给定的expire参数的原始时间单位（UNIT_SECONDS）
+ * "milliseconds" 输出结果
+ * 
+ * 如果返回C_OK，"milliseconds" 参数将被设置为得到的绝对时间戳。
+ * 如果返回C_ERR，一个错误回复将被添加到给定客户端
  */
 static int getExpireMillisecondsOrReply(client *c, robj *expire, int flags, int unit, long long *milliseconds) {
+    // 获取过期时间所代表的绝对时间戳，将结果设置到"milliseconds"
     int ret = getLongLongFromObjectOrReply(c, expire, milliseconds, NULL);
     if (ret != C_OK) {
         return ret;
     }
 
+    // 对于负数或者超出了长度上限，返回错误
     if (*milliseconds <= 0 || (unit == UNIT_SECONDS && *milliseconds > LLONG_MAX / 1000)) {
         /* Negative value provided or multiplication is gonna overflow. */
         addReplyErrorExpireTime(c);
         return C_ERR;
     }
 
+    // 对于秒单位，毫秒要*1000
     if (unit == UNIT_SECONDS) *milliseconds *= 1000;
 
+    // 对于PX/EX的过期类型，追加命令的开始时间
     if ((flags & OBJ_PX) || (flags & OBJ_EX)) {
         *milliseconds += commandTimeSnapshot();
     }
 
+    // 对于负数，此处是因为数值越界了，返回错误
     if (*milliseconds <= 0) {
         /* Overflow detected. */
         addReplyErrorExpireTime(c);
@@ -284,8 +306,9 @@ void setCommand(client *c) {
         return;
     }
 
-    // 
+    // 尝试对值进行编码压缩，以减少空间占用
     c->argv[2] = tryObjectEncoding(c->argv[2]);
+    // 
     setGenericCommand(c,flags,c->argv[1],c->argv[2],expire,unit,NULL,NULL);
 }
 
@@ -304,6 +327,14 @@ void psetexCommand(client *c) {
     setGenericCommand(c,OBJ_PX,c->argv[1],c->argv[3],c->argv[2],UNIT_MILLISECONDS,NULL,NULL);
 }
 
+/**
+ * 通用的GET命令
+ * 
+ * 如果键类型不匹配，则返回C_ERR
+ * 
+ * 如果键不存在或已过期，则返回C_OK
+ * 如果键存在，则正常写入客户端输出缓冲区，返回C_OK
+ */
 int getGenericCommand(client *c) {
     robj *o; // 保存从db中对应key获取的值
 

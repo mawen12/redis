@@ -27,6 +27,9 @@
 
 #define UNUSED(V) ((void) V)
 
+/**
+ * 代表键值存储。
+ */
 struct _kvstore {
     int flags;
     dictType dtype;
@@ -146,13 +149,23 @@ static void cumulativeKeyCountAdd(kvstore *kvs, int didx, long delta) {
     }
 }
 
-/* Create the dict if it does not exist and return it. */
+/**
+ * 当指定槽位的Dict不存在时，创建并返回。
+ * 
+ * kvs: 保存了Dict的存储
+ * didx: 槽ID
+ */
 static dict *createDictIfNeeded(kvstore *kvs, int didx) {
+    // 返回该槽位ID的Dict
     dict *d = kvstoreGetDict(kvs, didx);
+    // 如果不为空，则直接返回
     if (d) return d;
 
+    // 在该槽ID上创建一个Dict
     kvs->dicts[didx] = dictCreate(&kvs->dtype);
+    // 将已分配的Dcit计数器+1
     kvs->allocated_dicts++;
+    // 返回创建的Dict
     return kvs->dicts[didx];
 }
 
@@ -814,8 +827,17 @@ dictEntry *kvstoreDictFind(kvstore *kvs, int didx, void *key) {
     return dictFind(d, key);
 }
 
+/**
+ * 
+ * kvs: 保存了所有键的存储
+ * dids: 基于key计算得出的槽ID
+ * key: 键
+ * existing: 
+ */
 dictEntry *kvstoreDictAddRaw(kvstore *kvs, int didx, void *key, dictEntry **existing) {
+    // 检查指定槽是否存在Dict，如果不存在则创建，并返回创建的
     dict *d = createDictIfNeeded(kvs, didx);
+    // 向Dict中添加key
     dictEntry *ret = dictAddRaw(d, key, existing);
     if (ret)
         cumulativeKeyCountAdd(kvs, didx, 1);
