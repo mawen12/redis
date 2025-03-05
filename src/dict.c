@@ -47,7 +47,7 @@ struct dictEntry {
     union {
         void *val; /* 原始值 */
         uint64_t u64;
-        int64_t s64;
+        int64_t s64; /* 过期时间 */
         double d;
     } v;
     struct dictEntry *next;     /* 在相同哈希桶中的下一个条目 */
@@ -894,6 +894,9 @@ void *dictGetVal(const dictEntry *de) {
     return de->v.val;
 }
 
+/**
+ * 从条目中返回过期时间
+ */
 int64_t dictGetSignedIntegerVal(const dictEntry *de) {
     assert(entryHasValue(de));
     return de->v.s64;

@@ -373,11 +373,16 @@ void setKey(client *c, redisDb *db, robj *key, robj *val, int flags) {
     if (!(flags & SETKEY_NO_SIGNAL)) signalModifiedKey(c,db,key);
 }
 
-/* Return a random key, in form of a Redis object.
- * If there are no keys, NULL is returned.
- *
- * The function makes sure to return keys not already expired. */
+/**
+ * 返回一个以Redis对象格式的随机键。
+ * 如果数据库中为空，则返回NULL。
+ * 
+ * @param db 从该数据库中获取的键
+ * @retval robj 未过期的键
+ * @retval NULL 数据库中不存在键
+ */
 robj *dbRandomKey(redisDb *db) {
+    // 保存要返回的字典条目
     dictEntry *de;
     int maxtries = 100;
     int allvolatile = kvstoreSize(db->keys) == kvstoreSize(db->expires);
@@ -414,6 +419,11 @@ robj *dbRandomKey(redisDb *db) {
 
 /**
  * 用于同步和异步删除的帮助类
+ * 
+ * @param db 数据库
+ * @param key 键
+ * @param async 是否异步 0 SYNC 1 ASYNC 
+ * @param flags 标识 DB_FLAG_KEY_NONE DB_FLAG_KEY_DELETED DB_FLAG_KEY_EXPIRED DB_FLAG_KEY_EVICTED DB_FLAG_KEY_OVERWRITE 
  */
 int dbGenericDelete(redisDb *db, robj *key, int async, int flags) {
     dictEntry **plink;
@@ -426,27 +436,26 @@ int dbGenericDelete(redisDb *db, robj *key, int async, int flags) {
         // 从字典条目中获取实际的值
         robj *val = dictGetVal(de);
 
-        /* If hash object with expiry on fields, remove it from HFE DS of DB */
+        // 如果HASh对象中的字段已过期，则将其从DB的HFE DS中删除
         if (val->type == OBJ_HASH)
             hashTypeRemoveFromExpires(&db->hexpires, val);
 
-        /* RM_StringDMA may call dbUnshareStringValue which may free val, so we
-         * need to incr to retain val */
+        // RM_StringDMA可能会调用 dbUnshareStringValue，这可能会释放值，因此我们需要增加以保留val
         incrRefCount(val);
-        /* Tells the module that the key has been unlinked from the database. */
+        // 通知模块，该Key已经和数据库取消连接
         moduleNotifyKeyUnlink(key,val,db->id,flags);
-        /* We want to try to unblock any module clients or clients using a blocking XREADGROUP */
+        // 我们希望尝试解除对任何模块客户端或使用阻塞 XREADGROUP 的客户端的阻塞
         signalDeletedKeyAsReady(db,key,val->type);
-        /* We should call decr before freeObjAsync. If not, the refcount may be
-         * greater than 1, so freeObjAsync doesn't work */
+        // 在 freeObjAsync 之前，我们应该减少值引用，如果不这样做，refcount可能超过1，
+        // 这样 freeObjAsync 就无法工作了。
         decrRefCount(val);
+
         if (async) {
-            /* Because of dbUnshareStringValue, the val in de may change. */
+            // 由于 dbUnshareStringValue，值有可能发生变化
             freeObjAsync(key, dictGetVal(de), db->id);
             kvstoreDictSetVal(db->keys, slot, de, NULL);
         }
-        /* Deleting an entry from the expires dict will not free the sds of
-         * the key, because it is shared with the main dictionary. */
+        // 从过期字典中删除一个条目不会释放key的sds，因为它被主字典共享
         kvstoreDictDelete(db->expires, slot, key->ptr);
 
         kvstoreDictTwoPhaseUnlinkFree(db->keys, slot, de, plink, table);
@@ -461,8 +470,12 @@ int dbSyncDelete(redisDb *db, robj *key) {
     return dbGenericDelete(db, key, 0, DB_FLAG_KEY_DELETED);
 }
 
-/* Delete a key, value, and associated expiration entry if any, from the DB. If
- * the value consists of many allocations, it may be freed asynchronously. */
+/**
+ * 删除键、值和关联的过期条目（如果有）。如果值包含许多分配，则可能会异步释放。
+ * 
+ * @param db 数据库
+ * @param key 要被删除的键
+ */
 int dbAsyncDelete(redisDb *db, robj *key) {
     return dbGenericDelete(db, key, 1, DB_FLAG_KEY_DELETED);
 }
@@ -641,8 +654,10 @@ void discardTempDb(redisDb *tempDb, void(callback)(dict*)) {
 }
 
 int selectDb(client *c, int id) {
+    // id必须在[0, dbnum)范围内
     if (id < 0 || id >= server.dbnum)
         return C_ERR;
+    // 修改该客户端并指向新的数据库
     c->db = &server.db[id];
     return C_OK;
 }
@@ -842,55 +857,94 @@ void flushdbCommand(client *c) {
 }
 
 /* This command implements DEL and UNLINK. */
+/**
+ * 该函数实现了 DEL 和 UNLINK 命令
+ * 
+ * @param c 发送命令的客户端对象
+ * @param lazy 0 SYNC, 1 ASYNC(UNLINK) 
+ */
 void delGenericCommand(client *c, int lazy) {
     int numdel = 0, j;
 
+    // j = 1，即跳过第一个命令 DEL/UNLINK，获取之后的所有key
     for (j = 1; j < c->argc; j++) {
+        // 如果键已被删除，则跳过不处理
         if (expireIfNeeded(c->db,c->argv[j],0) == KEY_DELETED)
             continue;
+        // 执行键删除，对于同步删除，该操作会阻塞；而异步删除则不会
         int deleted  = lazy ? dbAsyncDelete(c->db,c->argv[j]) :
                               dbSyncDelete(c->db,c->argv[j]);
+        
         if (deleted) {
             signalModifiedKey(c,c->db,c->argv[j]);
-            notifyKeyspaceEvent(NOTIFY_GENERIC,
-                "del",c->argv[j],c->db->id);
-            server.dirty++;
-            numdel++;
+            notifyKeyspaceEvent(NOTIFY_GENERIC,"del",c->argv[j],c->db->id);
+            server.dirty++; // 发生数据变更，增加计数
+            numdel++; // 增加删除成功的计数
         }
     }
+    // 返回删除成功的键数量
     addReplyLongLong(c,numdel);
 }
 
+/**
+ * DEL命令入口
+ * 
+ * 命令格式：DEL key [key...]
+ * 
+ * @param c 发送命令的客户端对象
+ */
 void delCommand(client *c) {
     delGenericCommand(c,server.lazyfree_lazy_user_del);
 }
 
+/**
+ * UNLINK命令入口
+ * 
+ * 命令格式：UNLINK key [key...]
+ */
 void unlinkCommand(client *c) {
     delGenericCommand(c,1);
 }
 
-/* EXISTS key1 key2 ... key_N.
- * Return value is the number of keys existing. */
+ /**
+  * EXISTS命令入口
+  * 
+  * 命令格式：EXISTS key [key...]
+  */
 void existsCommand(client *c) {
-    long long count = 0;
+    long long count = 0; // 存在的计数
     int j;
 
+    // j = 1，即跳过第一个命令 EXIST，获取之后的所有key
     for (j = 1; j < c->argc; j++) {
+        // 查找密钥，且不触发任何修改
         if (lookupKeyReadWithFlags(c->db,c->argv[j],LOOKUP_NOTOUCH)) count++;
     }
+    // 返回密钥存在的数量
     addReplyLongLong(c,count);
 }
 
+/**
+ * SELECT命令入口
+ * 
+ * 命令格式：SELECT index
+ * 
+ * @param c 携带命令的客户端
+ */
 void selectCommand(client *c) {
     int id;
 
+    // c->argv[1] 获取数据库的index
     if (getIntFromObjectOrReply(c, c->argv[1], &id, NULL) != C_OK)
         return;
 
+    // 当开启集群时，不允许使用SELECT命令
     if (server.cluster_enabled && id != 0) {
         addReplyError(c,"SELECT is not allowed in cluster mode");
         return;
     }
+
+    // 切换数据库
     if (selectDb(c,id) == C_ERR) {
         addReplyError(c,"DB index is out of range");
     } else {
@@ -898,9 +952,18 @@ void selectCommand(client *c) {
     }
 }
 
+/**
+ * RANDOMKEY命令入口
+ * 
+ * 命令格式：RANDOMKEY
+ * 
+ * @param c 携带命令的客户端
+ */
 void randomkeyCommand(client *c) {
+    // 保存要返回的key
     robj *key;
 
+    // c->db 从当前数据库中选择随机选择
     if ((key = dbRandomKey(c->db)) == NULL) {
         addReplyNull(c);
         return;
@@ -1911,49 +1974,68 @@ void setExpire(client *c, redisDb *db, robj *key, long long when) {
         rememberSlaveKeyWithExpire(db,key);
 }
 
-/* Return the expire time of the specified key, or -1 if no expire
- * is associated with this key (i.e. the key is non volatile) */
+/**
+ * 返回数据库中key的过期时间
+ * 
+ * @param db 数据库
+ * @param key 键
+ * 
+ * @retval -1 键没有设置过期时间
+ * @retval !-1 键实际的过期时间，这是一个时间戳
+ */
 long long getExpire(redisDb *db, robj *key) {
     dictEntry *de;
-
+    // 从db->expires中获取过期的键，返回NULL，代表其没有设置过期时间
     if ((de = dbFindExpires(db, key->ptr)) == NULL)
         return -1;
 
+    // 获取该条目的过期时间
     return dictGetSignedIntegerVal(de);
 }
 
-/* Delete the specified expired key and propagate expire. */
+/**
+ * 从数据库中删除特定的键，并传播过期
+ * 
+ * @param db 数据库
+ * @param keyobj 键
+ */
 void deleteExpiredKeyAndPropagate(redisDb *db, robj *keyobj) {
     mstime_t expire_latency;
     latencyStartMonitor(expire_latency);
+    // 减少val的引用
     dbGenericDelete(db,keyobj,server.lazyfree_lazy_expire,DB_FLAG_KEY_EXPIRED);
+
     latencyEndMonitor(expire_latency);
     latencyAddSampleIfNeeded("expire-del",expire_latency);
+    // 发送 keyspace 事件
     notifyKeyspaceEvent(NOTIFY_EXPIRED,"expired",keyobj,db->id);
     signalModifiedKey(NULL, db, keyobj);
+    // 传播删除
     propagateDeletion(db,keyobj,server.lazyfree_lazy_expire);
     server.stat_expiredkeys++;
 }
 
-/* Propagate an implicit key deletion into replicas and the AOF file.
- * When a key was deleted in the master by eviction, expiration or a similar
- * mechanism a DEL/UNLINK operation for this key is sent
- * to all the replicas and the AOF file if enabled.
- *
- * This way the key deletion is centralized in one place, and since both
- * AOF and the replication link guarantee operation ordering, everything
- * will be consistent even if we allow write operations against deleted
- * keys.
- *
- * This function may be called from:
- * 1. Within call(): Example: Lazy-expire on key access.
- *    In this case the caller doesn't have to do anything
- *    because call() handles server.also_propagate(); or
- * 2. Outside of call(): Example: Active-expire, eviction, slot ownership changed.
- *    In this the caller must remember to call
- *    postExecutionUnitOperations, preferably just after a
- *    single deletion batch, so that DEL/UNLINK will NOT be wrapped
- *    in MULTI/EXEC */
+/**
+ * 将隐式键删除传播到副本和AOF文件。
+ * 当一个键在master中由于驱逐、过期或DEL/UNLINK操作而被删除。该键将
+ * 被发送到所有的副本和AOF文件（如果启用了AOF）。
+ * 
+ * 这样，键的删除就集中在一个地方，并且由于AOF和复制连接都保证操作顺序，
+ * 所以即使我们允许针对已删除的键进行写操作，一切都将一致。
+ * 
+ * 可以从以下位置调用该函数：
+ * 1.在call()中: 示例：键访问延迟过期
+ *  在这种情况下，调用者无需执行任何操作，因为call()处理 server.also_propagate()；
+ *  或是第二种
+ * 2.在call()之外调用，示例：主动过期，驱逐，槽所有权变更。
+ *  在这种情况下，调用者必须记得调用 postExecutionUnitOperations，
+ *  最好是在单个删除批处理之后调用，因此 DEL/UNLINK 将不会被包装在 MULTI/EXEC 中。
+ * 
+ * 
+ * @param db 数据库
+ * @param key 键
+ * @param lazy 1 UNLINK, 0 DEL
+ */
 void propagateDeletion(redisDb *db, robj *key, int lazy) {
     robj *argv[2];
 
@@ -1962,104 +2044,118 @@ void propagateDeletion(redisDb *db, robj *key, int lazy) {
     incrRefCount(argv[0]);
     incrRefCount(argv[1]);
 
-    /* If the master decided to delete a key we must propagate it to replicas no matter what.
-     * Even if module executed a command without asking for propagation. */
+    // 如果master决定删除一个键，那么无论如何都需要将其传播给副本
+    // 即使模块执行了一个无需询问传播的命令
     int prev_replication_allowed = server.replication_allowed;
     server.replication_allowed = 1;
+    // 传播命令到AOF和副本
     alsoPropagate(db->id,argv,2,PROPAGATE_AOF|PROPAGATE_REPL);
     server.replication_allowed = prev_replication_allowed;
 
-    decrRefCount(argv[0]);
     decrRefCount(argv[1]);
+    decrRefCount(argv[0]);
 }
 
-/* Check if the key is expired. */
+/**
+ * 检查数据库中的key是否已过期
+ * 
+ * @param db 数据库
+ * @param key 键
+ * 
+ * @retval 0 尚未过期
+ * @retval >0 已过期
+ */
 int keyIsExpired(redisDb *db, robj *key) {
-    /* Don't expire anything while loading. It will be done later. */
+    // 在加载时任何东西不会过期，过期检查将在之后去做
     if (server.loading) return 0;
 
+    // 获取key的过期时间，对于没有设置过期时间的键，返回-1
     mstime_t when = getExpire(db,key);
     mstime_t now;
+    
+    // 该键没有设置过期
+    if (when < 0) return 0;
 
-    if (when < 0) return 0; /* No expire for this key */
-
+    // 当前的时间，毫秒
     now = commandTimeSnapshot();
 
-    /* The key expired if the current (virtual or real) time is greater
-     * than the expire time of the key. */
+    // 如果当前（虚拟或真实）时间大于键的过期时间，代表键已经过期
     return now > when;
 }
 
-/* This function is called when we are going to perform some operation
- * in a given key, but such key may be already logically expired even if
- * it still exists in the database. The main way this function is called
- * is via lookupKey*() family of functions.
- *
- * The behavior of the function depends on the replication role of the
- * instance, because by default replicas do not delete expired keys. They
- * wait for DELs from the master for consistency matters. However even
- * replicas will try to have a coherent return value for the function,
- * so that read commands executed in the replica side will be able to
- * behave like if the key is expired even if still present (because the
- * master has yet to propagate the DEL).
- *
- * In masters as a side effect of finding a key which is expired, such
- * key will be evicted from the database. Also this may trigger the
- * propagation of a DEL/UNLINK command in AOF / replication stream.
- *
- * On replicas, this function does not delete expired keys by default, but
- * it still returns KEY_EXPIRED if the key is logically expired. To force deletion
- * of logically expired keys even on replicas, use the EXPIRE_FORCE_DELETE_EXPIRED
- * flag. Note though that if the current client is executing
- * replicated commands from the master, keys are never considered expired.
- *
- * On the other hand, if you just want expiration check, but need to avoid
- * the actual key deletion and propagation of the deletion, use the
- * EXPIRE_AVOID_DELETE_EXPIRED flag.
- *
- * The return value of the function is KEY_VALID if the key is still valid.
- * The function returns KEY_EXPIRED if the key is expired BUT not deleted,
- * or returns KEY_DELETED if the key is expired and deleted. */
+/**
+ * 当我们对给定的key要执行某些操作时，该函数会被调用，但是该key即使存在
+ * 数据库中，也有可能过期了。该函数的主要调用方式是通过 lookupKey(*) 函数系列。
+ * 
+ * 该函数的行为由实例的副本角色所决定，由于默认的副本不会删除已过期的key。
+ * 它们等待来自master的DEL命令以确保一致性。然而副本也会尝试为该函数提供一致
+ * 的返回值，以便在副本端执行的读取命令能够表现得像key已过期一样，即使key仍然
+ * 存在（因为master尚未传递DEL）。
+ * 
+ * 在master上，如果发现了key已经过期，则会产生副作用，该key将从数据库中删除。
+ * 这还可能触发AOF/副本流中DEL/UNLINK命令的传播。
+ * 
+ * 在slave上，该函数默认不删除过期的key，但是如果key已经过期了，仍然返回 KEY_EXPIRED。
+ * 为了能够强制删除位于副本上的已经过期的key，使用 EXPIRE_FORCE_DELETE_EXPIRED 标识。
+ * 但请注意，如果当前客户端正在执行来自master的复制命令，则key永远不会被视为过期。
+ * 
+ * 从另一方面来说，如果你仅仅想要检查key是否过期，但是需要避免删除实际的key和传播删除，
+ * 使用 EXPIRE_AVIOD_DELETE_EXPIRED 标识。
+ * 
+ * @param db 数据库
+ * @param key 键
+ * @param flags 标识，可选项：EXPIRE_FORCE_DELETE_EXPIRED, EXPIRE_AVIOD_DELETE_EXPIRED
+ * 
+ * @retval KEY_VALID key合法，即尚未过期
+ * @retval KEY_EXPIRED key已过期但尚未被删除
+ * @retval KEY_DELETED key已过期并被删除，或者是键不存在
+ */
 keyStatus expireIfNeeded(redisDb *db, robj *key, int flags) {
+    
     if (server.lazy_expire_disabled) return KEY_VALID;
+    // 如果键已过期，返回0，否则视为合法
     if (!keyIsExpired(db,key)) return KEY_VALID;
 
-    /* If we are running in the context of a replica, instead of
-     * evicting the expired key from the database, we return ASAP:
-     * the replica key expiration is controlled by the master that will
-     * send us synthesized DEL operations for expired keys. The
-     * exception is when write operations are performed on writable
-     * replicas.
-     *
-     * Still we try to return the right information to the caller,
-     * that is, KEY_VALID if we think the key should still be valid,
-     * KEY_EXPIRED if we think the key is expired but don't want to delete it at this time.
-     *
-     * When replicating commands from the master, keys are never considered
-     * expired. */
+     /**
+      * 如果我们运行在副本的上下文中，则不会从数据库中逐出过期的Key，而是尽快返回。
+      * 副本上的key过期是由master控制，master向slave发送过期key的合成DEL操作。
+      * 例外情况是在可写副本上执行写入操作超时。
+      * 
+      * 但我们尝试向调用者返回正确的信息。那就是如果我们认为key没有过期，则返回 KEY_VALID；
+      * 如果我们认为key已经过期，但是此时不想删除该key，则返回 KEY_EXPIRED。
+      * 
+      * 当从master复制命令时，key永远不会被视为已过期。
+      */
     if (server.masterhost != NULL) {
+        // 如果key尚未不过，且当前位于master中，则返回KEY_VALID
         if (server.current_client && (server.current_client->flags & CLIENT_MASTER)) return KEY_VALID;
+        // 如果没有设置 EXPIRE_FORCE_DELETE_EXPIRED 标识，则返回 KEY_EXPIRED
         if (!(flags & EXPIRE_FORCE_DELETE_EXPIRED)) return KEY_EXPIRED;
     }
 
-    /* In some cases we're explicitly instructed to return an indication of a
-     * missing key without actually deleting it, even on masters. */
+    /**
+     * 在某些情况下，我们被明确指示返回丢失key的指示，而不实际删除它，即使是在master
+     * 上也是如此。
+     */
     if (flags & EXPIRE_AVOID_DELETE_EXPIRED)
         return KEY_EXPIRED;
 
-    /* If 'expire' action is paused, for whatever reason, then don't expire any key.
-     * Typically, at the end of the pause we will properly expire the key OR we
-     * will have failed over and the new primary will send us the expire. */
+    /**
+     * 如果 'expire' 操作被暂停，无论出于什么原因，都不会使任何key过期。
+     * 通常，在暂停结束时，我们将正确地是key过期，或者我们将进行故障转移，
+     * 新的master将向我们发送过期。
+     */
     if (isPausedActionsWithUpdate(PAUSE_ACTION_EXPIRE)) return KEY_EXPIRED;
 
-    /* The key needs to be converted from static to heap before deleted */
+    // 在删除前，需要将key从静态转换为栈
     int static_key = key->refcount == OBJ_STATIC_REFCOUNT;
     if (static_key) {
         key = createStringObject(key->ptr, sdslen(key->ptr));
     }
-    /* Delete the key */
+    // 删除键
     deleteExpiredKeyAndPropagate(db,key);
     if (static_key) {
+        // 
         decrRefCount(key);
     }
     return KEY_DELETED;
@@ -2111,13 +2207,26 @@ static dictEntry *dbFindGeneric(kvstore *kvs, void *key) {
 }
 
 /**
- * 从指定的db中查找指定的key，并返回结果
+ * 从数据库中查找键，并返回对应条目
+ * 
+ * @param db 数据库
+ * @param key 键
+ * @retval dictEntry 条目
  */
 dictEntry *dbFind(redisDb *db, void *key) {
+    // db->keys 中保存了该数据库中所有的键
     return dbFindGeneric(db->keys, key);
 }
 
+/**
+ * 从数据库中查找设置了过期的键，并返回对应条目
+ * 
+ * @param db 数据库
+ * @param key 键
+ * @retval dictEntry 条目
+ */
 dictEntry *dbFindExpires(redisDb *db, void *key) {
+    // db->expires 中保存了设置过期的键的集合
     return dbFindGeneric(db->expires, key);
 }
 

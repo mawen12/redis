@@ -45,8 +45,8 @@
 #define static_assert(expr, lit) extern char __static_assert_failure[(expr) ? 1:-1]
 #endif
 
-typedef long long mstime_t; /* millisecond time type. */
-typedef long long ustime_t; /* microsecond time type. */
+typedef long long mstime_t; /* 毫秒时间类型 */
+typedef long long ustime_t; /* 微妙时间类型 */
 
 #include "ae.h"      /* Event driven programming library */
 #include "sds.h"     /* Dynamic safe strings */
@@ -282,12 +282,12 @@ extern int configOOMScoreAdjValuesDefaults[CONFIG_OOM_COUNT];
 /* Key flags for when access type is unknown */
 #define CMD_KEY_FULL_ACCESS (CMD_KEY_RW | CMD_KEY_ACCESS | CMD_KEY_UPDATE)
 
-/* Key flags for how key is removed */
+/* 表明密钥如何移除的标识 */
 #define DB_FLAG_KEY_NONE 0
-#define DB_FLAG_KEY_DELETED (1ULL<<0)
-#define DB_FLAG_KEY_EXPIRED (1ULL<<1)
-#define DB_FLAG_KEY_EVICTED (1ULL<<2)
-#define DB_FLAG_KEY_OVERWRITE (1ULL<<3)
+#define DB_FLAG_KEY_DELETED (1ULL<<0) /* 删除 */
+#define DB_FLAG_KEY_EXPIRED (1ULL<<1) /* 过期 */
+#define DB_FLAG_KEY_EVICTED (1ULL<<2) /* 驱逐 */
+#define DB_FLAG_KEY_OVERWRITE (1ULL<<3) /* 覆盖 */
 
 /* Channel flags share the same flag space as the key flags */
 #define CMD_CHANNEL_PATTERN (1ULL<<11)     /* The argument is a channel pattern */
@@ -295,10 +295,10 @@ extern int configOOMScoreAdjValuesDefaults[CONFIG_OOM_COUNT];
 #define CMD_CHANNEL_UNSUBSCRIBE (1ULL<<13) /* The command unsubscribes to channels */
 #define CMD_CHANNEL_PUBLISH (1ULL<<14)     /* The command publishes to channels. */
 
-/* AOF states */
-#define AOF_OFF 0             /* AOF is off */
-#define AOF_ON 1              /* AOF is on */
-#define AOF_WAIT_REWRITE 2    /* AOF waits rewrite to start appending */
+/* AOF 状态标识 */
+#define AOF_OFF 0             /* AOF 关闭 */
+#define AOF_ON 1              /* AOF 开启 */
+#define AOF_WAIT_REWRITE 2    /* AOF 等待重写后才开始追加 */
 
 /* AOF return values for loadAppendOnlyFiles() and loadSingleAppendOnlyFile() */
 #define AOF_OK 0
@@ -590,9 +590,12 @@ typedef enum {
 #define CMD_CALL_FULL (CMD_CALL_PROPAGATE)
 
 /* Command propagation flags, see propagateNow() function */
-#define PROPAGATE_NONE 0
-#define PROPAGATE_AOF 1
-#define PROPAGATE_REPL 2
+/**
+ * 命令传播标识，请查阅 propagateNow() 函数
+ */
+#define PROPAGATE_NONE 0 /* 不传播 */
+#define PROPAGATE_AOF 1 /* 传播到AOF */
+#define PROPAGATE_REPL 2 /* 传播到slave */
 
 /* Actions pause types */
 #define PAUSE_ACTION_CLIENT_WRITE     (1<<0)
@@ -897,8 +900,8 @@ struct RedisModuleDigest {
 #define LRU_CLOCK_MAX ((1<<LRU_BITS)-1) /* Max value of obj->lru */
 #define LRU_CLOCK_RESOLUTION 1000 /* LRU clock resolution in ms */
 
-#define OBJ_SHARED_REFCOUNT INT_MAX     /* Global object never destroyed. */
-#define OBJ_STATIC_REFCOUNT (INT_MAX-1) /* Object allocated in the stack. */
+#define OBJ_SHARED_REFCOUNT INT_MAX     /* 全局对象永远不会被销毁 */
+#define OBJ_STATIC_REFCOUNT (INT_MAX-1) /* 对象在栈上分配 */
 #define OBJ_FIRST_SPECIAL_REFCOUNT OBJ_STATIC_REFCOUNT
 
 /**
@@ -1158,11 +1161,11 @@ typedef struct {
 #endif
 
 typedef struct client {
-    uint64_t id;            /* Client incremental unique ID. */
+    uint64_t id;            /* 客户端自增唯一ID */
     uint64_t flags;         /* Client flags: CLIENT_* macros. */
     connection *conn;
-    int resp;               /* RESP protocol version. Can be 2 or 3. */
-    redisDb *db;            /* Pointer to currently SELECTed DB. */
+    int resp;               /* RESP 协议版本，可以是2或3 */
+    redisDb *db;            /* 指向当前选定数据库的指针 */
     robj *name;             /* As set by CLIENT SETNAME. */
     robj *lib_name;         /* The client library name as set by CLIENT SETINFO. */
     robj *lib_ver;          /* The client library version as set by CLIENT SETINFO. */
@@ -1561,7 +1564,7 @@ struct redisServer {
     mode_t umask;               /* The umask value of the process on startup */
     int hz;                     /* serverCron() calls frequency in hertz */
     int in_fork_child;          /* indication that this is a fork child */
-    redisDb *db;
+    redisDb *db;                /* 逻辑数据库，默认有16个，编号从0开始 */
     dict *commands;             /* Command table */
     dict *orig_commands;        /* Command table before command renaming. */
     aeEventLoop *el;
@@ -1743,8 +1746,8 @@ struct redisServer {
     int maxidletime;                /* Client timeout in seconds */
     int tcpkeepalive;               /* Set SO_KEEPALIVE if non-zero. */
     int active_expire_enabled;      /* Can be disabled for testing purposes. */
-    int active_expire_effort;       /* From 1 (default) to 10, active effort. */
-    int lazy_expire_disabled;       /* If > 0, don't trigger lazy expire */
+    int active_expire_effort;       /* 从1到10，默认为1，主动到期努力 */
+    int lazy_expire_disabled;       /* 如果>0，则不会触发懒过期 */
     int active_defrag_enabled;
     int sanitize_dump_payload;      /* Enables deep sanitization for ziplist and listpack in RDB and RESTORE. */
     int skip_checksum_validation;   /* Disable checksum validation for RDB and RESTORE payload. */
@@ -1758,7 +1761,7 @@ struct redisServer {
     int active_defrag_cycle_max;       /* maximal effort for defrag in CPU percentage */
     unsigned long active_defrag_max_scan_fields; /* maximum number of fields of set/hash/zset/list to process from within the main dict scan */
     size_t client_max_querybuf_len; /* Limit for client query buffer length */
-    int dbnum;                      /* Total number of configured DBs */
+    int dbnum;                      /* 已配置数据库的总数，默认为16 */
     int supervised;                 /* 1 if supervised, 0 otherwise. */
     int supervised_mode;            /* See SUPERVISED_* */
     int daemonize;                  /* True if running as a daemon */
@@ -1811,11 +1814,11 @@ struct redisServer {
     int aof_disable_auto_gc;         /* If disable automatically deleting HISTORY type AOFs?
                                         default no. (for testings). */
 
-    /* RDB persistence */
-    long long dirty;                /* Changes to DB from the last save */
-    long long dirty_before_bgsave;  /* Used to restore dirty on failed BGSAVE */
-    long long rdb_last_load_keys_expired;  /* number of expired keys when loading RDB */
-    long long rdb_last_load_keys_loaded;   /* number of loaded keys when loading RDB */
+    /* RDB 持久化 */
+    long long dirty;                /* 从上次保存到现在数据库发生的变化次数 */
+    long long dirty_before_bgsave;  /* 用来在BGSAVE失败时恢复dirty */
+    long long rdb_last_load_keys_expired;  /* 当加载RDB时已过期的密钥数量 */
+    long long rdb_last_load_keys_loaded;   /* 当加载RDB时已加载的密钥数量 */
     int bgsave_aborted;             /* Set when killing a child, to treat it as aborted even if it succeeds. */
     struct saveparam *saveparams;   /* Save points array for RDB */
     int saveparamslen;              /* Number of saving points */

@@ -219,6 +219,8 @@ mstime_t mstime(void) {
  * 返回毫秒的命令时间镜像。
  * 命令启动时间是其逻辑时间，并且执行期间的所有时间读数应该
  * 反应相同的时间，更多详细信息可以在以下评论中找到。
+ * 
+ * @retval mstime_t 当前时间的毫秒
  */
 mstime_t commandTimeSnapshot(void) {
     /* When we are in the middle of a command execution, we want to use a
@@ -3309,17 +3311,18 @@ static void propagateNow(int dbid, robj **argv, int argc, int target) {
         replicationFeedSlaves(server.slaves,dbid,argv,argc);
 }
 
-/* Used inside commands to schedule the propagation of additional commands
- * after the current command is propagated to AOF / Replication.
- *
- * dbid is the database ID the command should be propagated into.
- * Arguments of the command to propagate are passed as an array of redis
- * objects pointers of len 'argc', using the 'argv' vector.
- *
- * The function does not take a reference to the passed 'argv' vector,
- * so it is up to the caller to release the passed argv (but it is usually
- * stack allocated).  The function automatically increments ref count of
- * passed objects, so the caller does not need to. */
+/**
+ * 在命令内部使用，用于在当前命令传播到AOF/副本后安排其他命令的传播。
+ * 
+ * 该函数不引用传递的'argv'向量，因此由调用者决定是否释放传递的argv(
+ * 但通常是在对堆上分配的)。该函数会自动增加传递的对象的引用计数，
+ * 因此调用者无需再做。
+ * 
+ * @param dbid 命令应该传递的目标数据库ID
+ * @param argv 以数组格式封装的命令参数的指针
+ * @param argc 数组长度
+ * @param target 标识，有 PROPAGATE_AOF, PROPAGATE_REPL
+ */
 void alsoPropagate(int dbid, robj **argv, int argc, int target) {
     robj **argvcopy;
     int j;
@@ -3332,6 +3335,7 @@ void alsoPropagate(int dbid, robj **argv, int argc, int target) {
         argvcopy[j] = argv[j];
         incrRefCount(argv[j]);
     }
+    
     redisOpArrayAppend(&server.also_propagate,dbid,argvcopy,argc,target);
 }
 

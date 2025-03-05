@@ -180,7 +180,9 @@ size_t lazyfreeGetFreeEffort(robj *key, robj *obj, int dbid) {
  * slower... So under a certain limit we just free the object synchronously. */
 #define LAZYFREE_THRESHOLD 64
 
-/* Free an object, if the object is huge enough, free it in async way. */
+/**
+ * 释放一个对象，如果对象足够大，则通过异步释放
+ */
 void freeObjAsync(robj *key, robj *obj, int dbid) {
     size_t free_effort = lazyfreeGetFreeEffort(key,obj,dbid);
     /* Note that if the object is shared, to reclaim it now it is not
