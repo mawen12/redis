@@ -3412,7 +3412,7 @@ void dbReplaceValue(redisDb *db, robj *key, robj *val);
 #define SETKEY_KEEPTTL 1        /* 用于SET命令，保留过期时间 */
 #define SETKEY_NO_SIGNAL 2
 #define SETKEY_ALREADY_EXIST 4  /* 用于SET命令，表示key已经存在 */
-#define SETKEY_DOESNT_EXIST 8   /* 用于SET命令，表示key上不存在 */
+#define SETKEY_DOESNT_EXIST 8   /* 用于SET命令，表示key不允许存在 */
 #define SETKEY_ADD_OR_UPDATE 16 /* key 很有可能不存在 */
 void setKey(client *c, redisDb *db, robj *key, robj *val, int flags);
 robj *dbRandomKey(redisDb *db);
