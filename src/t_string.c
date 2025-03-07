@@ -148,14 +148,14 @@ void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire,
 /**
  * 提取给定的SET/GET命令中的expire相关参数（EX/PX/EXAT/PXAT）
  * 
- * "client" 发送expire参数的客户端
- * "expire" 被解析的expire参数
- * "flags" 代表命令的行为（EX/PX）
- * "unit" 给定的expire参数的原始时间单位（UNIT_SECONDS）
- * "milliseconds" 输出结果
+ * @param client 发送expire参数的客户端
+ * @param expire 被解析的expire参数
+ * @param flags 代表命令的行为（EX/PX）
+ * @param unit 给定的expire参数的原始时间单位（UNIT_SECONDS）
+ * @param milliseconds 保存过期时间的计算结果
  * 
- * 如果返回C_OK，"milliseconds" 参数将被设置为得到的绝对时间戳。
- * 如果返回C_ERR，一个错误回复将被添加到给定客户端
+ * @retval C_OK "milliseconds" 参数将被设置为得到的绝对时间戳
+ * @retval C_ERR 一个错误回复将被添加到给定客户端
  */
 static int getExpireMillisecondsOrReply(client *c, robj *expire, int flags, int unit, long long *milliseconds) {
     // 获取过期时间所代表的绝对时间戳，将结果设置到"milliseconds"
@@ -171,7 +171,7 @@ static int getExpireMillisecondsOrReply(client *c, robj *expire, int flags, int 
         return C_ERR;
     }
 
-    // 对于秒单位，毫秒要*1000
+    // 对于秒单位，转变为毫秒需要*1000
     if (unit == UNIT_SECONDS) *milliseconds *= 1000;
 
     // 对于PX/EX的过期类型，追加命令的开始时间
@@ -207,6 +207,14 @@ static int getExpireMillisecondsOrReply(client *c, robj *expire, int flags, int 
  * 
  * 一旦参数被解析，将更新输入标识符。如果是EX/EXAT/PX/PXAT参数，则更新Unit和expire。
  * 如果设置了PX/PXAT，则Unit被更新为millisecond。
+ * 
+ * @param c 携带命令的客户端
+ * @param flags 命令选项标识，有 EX/EXAT/PX/PXAT/PERSIST
+ * @param unit 过期时间单位，有seconds/milliseconds
+ * @param command_type 命令类型，有GET/SET
+ * 
+ * @retval C_OK 语法正确，解析成功
+ * @retval C_ERR 语法错误
  */
 int parseExtendedStringArgumentsOrReply(client *c, int *flags, int *unit, robj **expire, int command_type) {
 
@@ -355,64 +363,69 @@ int getGenericCommand(client *c) {
 }
 
 /**
- * GET <key> 命令的入口
+ * GET命令入口
+ * 
+ * 命令格式：GET key
  */
 void getCommand(client *c) {
     getGenericCommand(c);
 }
 
-/*
- * GETEX <key> [PERSIST][EX seconds][PX milliseconds][EXAT seconds-timestamp][PXAT milliseconds-timestamp]
- *
- * The getexCommand() function implements extended options and variants of the GET command. Unlike GET
- * command this command is not read-only.
- *
- * The default behavior when no options are specified is same as GET and does not alter any TTL.
- *
- * Only one of the below options can be used at a given time.
- *
- * 1. PERSIST removes any TTL associated with the key.
- * 2. EX Set expiry TTL in seconds.
- * 3. PX Set expiry TTL in milliseconds.
- * 4. EXAT Same like EX instead of specifying the number of seconds representing the TTL
- *      (time to live), it takes an absolute Unix timestamp
- * 5. PXAT Same like PX instead of specifying the number of milliseconds representing the TTL
- *      (time to live), it takes an absolute Unix timestamp
- *
- * Command would either return the bulk string, error or nil.
+
+/**
+ * GETEX命令入口
+ * 
+ * 命令格式：GETEX key [EX seconds | PX milliseconds | EXAT unix-time-seconds | PXAT unix-time-milliseconds | PERSIST]
+ * 
+ * 该命令扩展了GET命令，按照提供的额外选项设置Key的过期信息，它不是一个只读的命令，而不是存在写操作。
+ * 如果未提供可选项，则其行为类似于GET命令。
+ * 
+ * 同一时间只能应用上述选项的一个：
+ * 1.EX seconds: 设置过期TTL（以秒为单位）
+ * 2.PX milliseconds: 设置过期TTL（以毫秒为单位）
+ * 3.EXAT unix-time-seconds: 与EX类似，但是它不指定表示TTL的秒数，而是采用绝对Unix时间戳
+ * 4.PXAT unix-time-milliseconds: 与PX类似，但是它不指定表示TTL的毫秒数，而是采用绝对Unix时间戳
+ * 5.PERSIST 删除与key关联的TTL（Time to live）
+ * 
+ * @param c 携带命令的客户端
+ * @retval 命令将返回批量字符串，错误或NULL
  */
 void getexCommand(client *c) {
     robj *expire = NULL;
     int unit = UNIT_SECONDS;
     int flags = OBJ_NO_FLAGS;
 
+    // 解析可选项，并分别设置到对应参数上，解析错误，直接返回
     if (parseExtendedStringArgumentsOrReply(c,&flags,&unit,&expire,COMMAND_GET) != C_OK) {
         return;
     }
 
     robj *o;
-
+    // 从客户端对应的数据库中查询，如果不存在，直接返回
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.null[c->resp])) == NULL)
         return;
 
+    // 对应值的类型是否为STRING，非STRING类型直接返回
     if (checkType(c,o,OBJ_STRING)) {
         return;
     }
 
-    /* Validate the expiration time value first */
+    // 首先校验过期时间值
     long long milliseconds = 0;
+    // 解析过期时间，并将其转换为决定的unix时间戳
     if (expire && getExpireMillisecondsOrReply(c, expire, flags, unit, &milliseconds) != C_OK) {
         return;
     }
 
-    /* We need to do this before we expire the key or delete it */
+    // 在对key过期或删除前必须这样做
     addReplyBulk(c,o);
 
-    /* This command is never propagated as is. It is either propagated as PEXPIRE[AT],DEL,UNLINK or PERSIST.
-     * This why it doesn't need special handling in feedAppendOnlyFile to convert relative expire time to absolute one. */
+    /**
+     * 该命令永远不会按原样传播，它要么作为 PEXPIRE[AT], DEL, UNLINK 或 PERSIST 传播。
+     * 这就是为什么它不需要在 feedAppendOnlyFile 中进行特殊处理以将相对时间转换为绝对过期时间。
+     */
     if (((flags & OBJ_PXAT) || (flags & OBJ_EXAT)) && checkAlreadyExpired(milliseconds)) {
-        /* When PXAT/EXAT absolute timestamp is specified, there can be a chance that timestamp
-         * has already elapsed so delete the key in that case. */
+        // 当使用 PXAT/EXAT 指定了绝对时间戳，有可能时间戳晚于当前时间，因此在这种情况下需要删除key
         int deleted = dbGenericDelete(c->db, c->argv[1], server.lazyfree_lazy_expire, DB_FLAG_KEY_EXPIRED);
         serverAssert(deleted);
         robj *aux = server.lazyfree_lazy_expire ? shared.unlink : shared.del;
@@ -421,9 +434,9 @@ void getexCommand(client *c) {
         notifyKeyspaceEvent(NOTIFY_GENERIC, "del", c->argv[1], c->db->id);
         server.dirty++;
     } else if (expire) {
+        // 处理设置了过期，但是尚未过期的情况
         setExpire(c,c->db,c->argv[1],milliseconds);
-        /* Propagate as PXEXPIREAT millisecond-timestamp if there is
-         * EX/PX/EXAT/PXAT flag and the key has not expired. */
+        // 如果存在 EX/PX/EXAT/PXAT 标识，且key尚未过期，则以 PXEXPIREATR 命令传播毫秒时间戳
         robj *milliseconds_obj = createStringObjectFromLongLong(milliseconds);
         rewriteClientCommandVector(c,3,shared.pexpireat,c->argv[1],milliseconds_obj);
         decrRefCount(milliseconds_obj);
@@ -431,6 +444,7 @@ void getexCommand(client *c) {
         notifyKeyspaceEvent(NOTIFY_GENERIC,"expire",c->argv[1],c->db->id);
         server.dirty++;
     } else if (flags & OBJ_PERSIST) {
+        // 移除键上的过期时间
         if (removeExpire(c->db, c->argv[1])) {
             signalModifiedKey(c, c->db, c->argv[1]);
             rewriteClientCommandVector(c, 2, shared.persist, c->argv[1]);
@@ -441,14 +455,18 @@ void getexCommand(client *c) {
 }
 
 /**
- * GETDEL <key> 的命令入口
+ * GETDEL命令入口
+ * 
+ * 命令格式：GETDEL key
+ * 
+ * @param c 携带命令的客户端
  */
 void getdelCommand(client *c) {
     // 当获取key对应的value报错时，直接返回
     if (getGenericCommand(c) == C_ERR) return;
-    // 
+    // 同步删除key
     if (dbSyncDelete(c->db, c->argv[1])) {
-        /* Propagate as DEL command */
+        // 作为 DEL 命令传播
         rewriteClientCommandVector(c,2,shared.del,c->argv[1]);
         signalModifiedKey(c, c->db, c->argv[1]);
         notifyKeyspaceEvent(NOTIFY_GENERIC, "del", c->argv[1], c->db->id);
@@ -456,14 +474,26 @@ void getdelCommand(client *c) {
     }
 }
 
+/**
+ * GETSET命令入口
+ * 
+ * 命令格式：GETSET key value
+ * 
+ * @param c 携带命令的客户端
+ * 
+ * 请注意，该命令从6.2.0已过期，推荐使用 SET GET 来替代。
+ */
 void getsetCommand(client *c) {
+    // 当获取keu对应的value报错时，直接返回
     if (getGenericCommand(c) == C_ERR) return;
+    // 尝试对value进行编码压缩
     c->argv[2] = tryObjectEncoding(c->argv[2]);
+    // 设置key
     setKey(c,c->db,c->argv[1],c->argv[2],0);
     notifyKeyspaceEvent(NOTIFY_STRING,"set",c->argv[1],c->db->id);
     server.dirty++;
 
-    /* Propagate as SET command */
+    // 作为 SET 命令传播
     rewriteClientCommandArgument(c,0,shared.set);
 }
 
@@ -527,40 +557,54 @@ void setrangeCommand(client *c) {
     addReplyLongLong(c,sdslen(o->ptr));
 }
 
+/**
+ * GETRANGE命令入口
+ * 
+ * 命令格式：GETRANGE key start end
+ * 
+ * @param c 携带命令的客户端
+ */
 void getrangeCommand(client *c) {
     robj *o;
     long long start, end;
     char *str, llbuf[32];
     size_t strlen;
 
+    // 获取开始长度
     if (getLongLongFromObjectOrReply(c,c->argv[2],&start,NULL) != C_OK)
         return;
+    // 获取结束长度
     if (getLongLongFromObjectOrReply(c,c->argv[3],&end,NULL) != C_OK)
         return;
-    if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.emptybulk)) == NULL ||
-        checkType(c,o,OBJ_STRING)) return;
+    // 获取键对应的对象，如果键对象不存在，或类型不匹配，则直接返回
+    if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.emptybulk)) == NULL || checkType(c,o,OBJ_STRING)) 
+        return;
 
+    // 如果是INT编码
     if (o->encoding == OBJ_ENCODING_INT) {
         str = llbuf;
+        // 将数字类型转换为字符串
         strlen = ll2string(llbuf,sizeof(llbuf),(long)o->ptr);
     } else {
+        // 读取实际的值
         str = o->ptr;
+        // 计算字符串长度
         strlen = sdslen(str);
     }
 
-    /* Convert negative indexes */
+    // 如果start>end，则直接返回
     if (start < 0 && end < 0 && start > end) {
         addReply(c,shared.emptybulk);
         return;
     }
+    // 对于负数的索引，转换为正数
     if (start < 0) start = strlen+start;
     if (end < 0) end = strlen+end;
     if (start < 0) start = 0;
     if (end < 0) end = 0;
     if ((unsigned long long)end >= strlen) end = strlen-1;
 
-    /* Precondition: end >= 0 && end < strlen, so the only condition where
-     * nothing can be returned is: start > end. */
+    // 前提条件：end >= 0 && end < strlen，因此唯一无法返回任何内容的条件是 start > end
     if (start > end || strlen == 0) {
         addReply(c,shared.emptybulk);
     } else {
@@ -568,36 +612,54 @@ void getrangeCommand(client *c) {
     }
 }
 
+/**
+ * MGET命令入口
+ * 
+ * 命令格式：MGET key [key ...]
+ */
 void mgetCommand(client *c) {
     int j;
 
+    // 添加要返回的数组长度，长度为所有参数-第一个的命令
     addReplyArrayLen(c,c->argc-1);
     for (j = 1; j < c->argc; j++) {
+        // 依次读取值
         robj *o = lookupKeyRead(c->db,c->argv[j]);
         if (o == NULL) {
+            // 值为NULL，则写入NULL
             addReplyNull(c);
         } else {
             if (o->type != OBJ_STRING) {
+                // 非字符串类型，则写入NULL
                 addReplyNull(c);
             } else {
+                // 写入对象
                 addReplyBulk(c,o);
             }
         }
     }
 }
 
+/**
+ * mset通用命令处理
+ * 
+ * @param c 携带命令的客户端
+ * @param nx 1：不允许键存在，0：允许键存在
+ */
 void msetGenericCommand(client *c, int nx) {
     int j;
 
+    // 如果命令的参数长度为偶数倍，则代表参数数量错误，应该为奇数
     if ((c->argc % 2) == 0) {
         addReplyErrorArity(c);
         return;
     }
 
-    /* Handle the NX flag. The MSETNX semantic is to return zero and don't
-     * set anything if at least one key already exists. */
+    // 处理 NX 表示，当至少一个键存在时，MSETNX 语义是返回0，且不进行任何处理
     if (nx) {
+        // j+=2 每隔两个处理一次
         for (j = 1; j < c->argc; j += 2) {
+            // 检查可写的键是否存在，如果键已经存在，则立刻返回0
             if (lookupKeyWrite(c->db,c->argv[j]) != NULL) {
                 addReply(c, shared.czero);
                 return;
@@ -607,7 +669,9 @@ void msetGenericCommand(client *c, int nx) {
 
     int setkey_flags = nx ? SETKEY_DOESNT_EXIST : 0;
     for (j = 1; j < c->argc; j += 2) {
+        // 尝试对值进行编码
         c->argv[j+1] = tryObjectEncoding(c->argv[j+1]);
+        // 写入键和值
         setKey(c, c->db, c->argv[j], c->argv[j + 1], setkey_flags);
         notifyKeyspaceEvent(NOTIFY_STRING,"set",c->argv[j],c->db->id);
         /* In MSETNX, It could be that we're overriding the same key, we can't be sure it doesn't exist. */
@@ -618,30 +682,56 @@ void msetGenericCommand(client *c, int nx) {
     addReply(c, nx ? shared.cone : shared.ok);
 }
 
+/**
+ * MSET命令入口
+ * 
+ * 命令格式：MSET key value [key value ...]
+ * 
+ * @param c 携带命令的客户端
+ */
 void msetCommand(client *c) {
+    // 允许键已存在
     msetGenericCommand(c,0);
 }
 
+/**
+ * MSETNX命令入口
+ * 
+ * 命令格式：MSETNX key value [key value ...]
+ */
 void msetnxCommand(client *c) {
+    // 不允许键已存在
     msetGenericCommand(c,1);
 }
 
+/**
+ * 自增或自减命令
+ * 
+ * @param c 携带命令的客户端
+ * @param incr 自增的数量
+ */
 void incrDecrCommand(client *c, long long incr) {
     long long value, oldvalue;
     robj *o, *new;
 
+    // 查找键的值
     o = lookupKeyWrite(c->db,c->argv[1]);
+    // 如果是STRING类型，则直接返回
     if (checkType(c,o,OBJ_STRING)) return;
+    // 如果长度为0，即对象不存在，则直接返回
     if (getLongLongFromObjectOrReply(c,o,&value,NULL) != C_OK) return;
 
     oldvalue = value;
+    // 检查值是否越界
     if ((incr < 0 && oldvalue < 0 && incr < (LLONG_MIN-oldvalue)) ||
         (incr > 0 && oldvalue > 0 && incr > (LLONG_MAX-oldvalue))) {
         addReplyError(c,"increment or decrement would overflow");
         return;
     }
+    // 增加值
     value += incr;
 
+    // 
     if (o && o->refcount == 1 && o->encoding == OBJ_ENCODING_INT &&
         (value < 0 || value >= OBJ_SHARED_INTEGERS) &&
         value >= LONG_MIN && value <= LONG_MAX)
@@ -662,10 +752,22 @@ void incrDecrCommand(client *c, long long incr) {
     addReplyLongLong(c, value);
 }
 
+/**
+ * INCR命令入口
+ * 
+ * 命令格式：INCR key
+ * 
+ * @param c 携带命令的客户端
+ */
 void incrCommand(client *c) {
     incrDecrCommand(c,1);
 }
 
+/**
+ * DECR命令入口
+ * 
+ * 命令格式：DECR
+ */
 void decrCommand(client *c) {
     incrDecrCommand(c,-1);
 }

@@ -3745,14 +3745,15 @@ void redactClientCommandArgument(client *c, int argc) {
     c->original_argv[argc] = shared.redacted;
 }
 
-/* Rewrite the command vector of the client. All the new objects ref count
- * is incremented. The old command vector is freed, and the old objects
- * ref count is decremented. */
+/**
+ * 重写客户端的命令向量。所有新创建对象的引用总数递增。老的命令向量被释放，
+ * 老对象的引用总数被递减。
+ */
 void rewriteClientCommandVector(client *c, int argc, ...) {
     va_list ap;
     int j;
-    robj **argv; /* The new argument vector */
-
+    robj **argv; /* 新参数向量 */
+    
     argv = zmalloc(sizeof(robj*)*argc);
     va_start(ap,argc);
     for (j = 0; j < argc; j++) {

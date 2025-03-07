@@ -372,9 +372,7 @@ extern int configOOMScoreAdjValuesDefaults[CONFIG_OOM_COUNT];
 #define CLIENT_PROTOCOL_ERROR (1ULL<<39) /* Protocol error chatting with it. */
 #define CLIENT_CLOSE_AFTER_COMMAND (1ULL<<40) /* Close after executing commands
                                                * and writing entire reply. */
-#define CLIENT_DENY_BLOCKING (1ULL<<41) /* Indicate that the client should not be blocked.
-                                           currently, turned on inside MULTI, Lua, RM_Call,
-                                           and AOF client */
+#define CLIENT_DENY_BLOCKING (1ULL<<41) /* 指示客户端不应被阻塞。目前，在 MULTI, Lua, RM_Call和AOF客户端内开启 */
 #define CLIENT_REPL_RDBONLY (1ULL<<42) /* This client is a replica that only wants
                                           RDB without replication buffer. */
 #define CLIENT_NO_EVICT (1ULL<<43) /* This client is protected against client
@@ -692,8 +690,6 @@ typedef enum {
  * 数据类型
  *----------------------------------------------------------------------------*/
 
-/* A redis object, that is a type able to hold a string / list / set */
-
 /* 实际的Redis对象，也是Redis基本的五大对象 */
 #define OBJ_STRING 0    /* String 对象. */
 #define OBJ_LIST 1      /* List 对象. */
@@ -701,20 +697,19 @@ typedef enum {
 #define OBJ_ZSET 3      /* Sorted set 对象. */
 #define OBJ_HASH 4      /* Hash 对象. */
 
-/* The "module" object type is a special one that signals that the object
- * is one directly managed by a Redis module. In this case the value points
- * to a moduleValue struct, which contains the object value (which is only
- * handled by the module itself) and the RedisModuleType struct which lists
- * function pointers in order to serialize, deserialize, AOF-rewrite and
- * free the object.
- *
- * Inside the RDB file, module types are encoded as OBJ_MODULE followed
- * by a 64 bit module type ID, which has a 54 bits module-specific signature
- * in order to dispatch the loading to the right module, plus a 10 bits
- * encoding version. */
-#define OBJ_MODULE 5    /* Module object. */
-#define OBJ_STREAM 6    /* Stream object. */
-#define OBJ_TYPE_MAX 7  /* Maximum number of object types */
+/**
+ * "module" 对象类型是特殊的一个，该对象由Redis Module直接管理。
+ * 在这种情况下，该值指向 moduleValue 结构，其中包含对象值（仅由
+ * 模块本身处理）和 RedisModuleType 结构，该结构列出了函数指针，
+ * 以便对对象进行序列化、反序列化、AOF重写和释放。
+ * 
+ * 在 RDB 文件中，模块类型被编码为 OBJ_MODULE，其后跟着64位的模块类型ID，
+ * 其中由54位的模块特定签名用于将其分发到指定模块去加载，再加上10
+ * 位的编码版本。
+ */
+#define OBJ_MODULE 5    /* 模块对象. */
+#define OBJ_STREAM 6    /* 流对象. */
+#define OBJ_TYPE_MAX 7  /* 最大对象类型数 */
 
 /* Extract encver / signature from a module type ID. */
 #define REDISMODULE_TYPE_ENCVER_BITS 10
@@ -879,22 +874,23 @@ struct RedisModuleDigest {
 /* Macro to check if the client is in the middle of module based authentication. */
 #define clientHasModuleAuthInProgress(c) ((c)->module_auth_ctx != NULL)
 
-/* Objects encoding. Some kind of objects like Strings and Hashes can be
- * internally represented in multiple ways. The 'encoding' field of the object
- * is set to one of this fields for this object. */
-#define OBJ_ENCODING_RAW 0     /* Raw representation */
-#define OBJ_ENCODING_INT 1     /* Encoded as integer */
-#define OBJ_ENCODING_HT 2      /* Encoded as hash table */
-#define OBJ_ENCODING_ZIPMAP 3  /* No longer used: old hash encoding. */
-#define OBJ_ENCODING_LINKEDLIST 4 /* No longer used: old list encoding. */
-#define OBJ_ENCODING_ZIPLIST 5 /* No longer used: old list/hash/zset encoding. */
-#define OBJ_ENCODING_INTSET 6  /* Encoded as intset */
-#define OBJ_ENCODING_SKIPLIST 7  /* Encoded as skiplist */
-#define OBJ_ENCODING_EMBSTR 8  /* Embedded sds string encoding */
-#define OBJ_ENCODING_QUICKLIST 9 /* Encoded as linked list of listpacks */
-#define OBJ_ENCODING_STREAM 10 /* Encoded as a radix tree of listpacks */
-#define OBJ_ENCODING_LISTPACK 11 /* Encoded as a listpack */
-#define OBJ_ENCODING_LISTPACK_EX 12 /* Encoded as listpack, extended with metadata */
+/**
+ * 对象编码。某些类型的对象像是字符串和哈希在内部可以使用多种方式来代表。
+ * 对象上的'encoding'字段取自以下其一。
+ */
+#define OBJ_ENCODING_RAW 0     /* 原始代码 */
+#define OBJ_ENCODING_INT 1     /* int 编码 */
+#define OBJ_ENCODING_HT 2      /* hash table 编码 */
+#define OBJ_ENCODING_ZIPMAP 3  /* 不再使用，旧的 hash 编码 */
+#define OBJ_ENCODING_LINKEDLIST 4 /* 不再使用，旧的 list 编码 */
+#define OBJ_ENCODING_ZIPLIST 5 /* 不再使用，旧的 list/hash/zset 编码 */
+#define OBJ_ENCODING_INTSET 6  /* intset 编码 */
+#define OBJ_ENCODING_SKIPLIST 7  /* skiplist 编码 */
+#define OBJ_ENCODING_EMBSTR 8  /* 嵌入式 sds string 编码 */
+#define OBJ_ENCODING_QUICKLIST 9 /* 编码为 listpacks 的 linked list */
+#define OBJ_ENCODING_STREAM 10 /* 编码为 listpacks 的 radix tree */
+#define OBJ_ENCODING_LISTPACK 11 /* 编码为 listpack  */
+#define OBJ_ENCODING_LISTPACK_EX 12 /* 编码为 listpack, 使用元数据扩展 */
 
 #define LRU_BITS 24
 #define LRU_CLOCK_MAX ((1<<LRU_BITS)-1) /* Max value of obj->lru */
@@ -908,12 +904,26 @@ struct RedisModuleDigest {
  * 代表Redis对象的类
  */
 struct redisObject {
+    /**
+     * 对象类型，取自 OBJ_XXX
+     */
     unsigned type:4;
+    /**
+     * 对象的编码，取自 OBJ_ENCODING_XXX
+     */
     unsigned encoding:4;
-    unsigned lru:LRU_BITS; /* LRU time (relative to global lru_clock) or
-                            * LFU data (least significant 8 bits frequency
-                            * and most significant 16 bits access time). */
+    /**
+     * LRU(Least Recente Used) time （相对于全局 lru_lock），
+     * 或 LFU(Least F Used) 数据（最低有效8位频率和最高16位有效访问时间）
+     */
+    unsigned lru:LRU_BITS;
+    /**
+     * 被引用的数量，因为 Redis 对象是共享的
+     */
     int refcount;
+    /**
+     * 实际的值
+     */
     void *ptr;
 };
 
@@ -1172,8 +1182,8 @@ typedef struct client {
     sds querybuf;           /* Buffer we use to accumulate client queries. */
     size_t qb_pos;          /* The position we have read in querybuf. */
     size_t querybuf_peak;   /* Recent (100ms or more) peak of querybuf size. */
-    int argc;               /* Num of arguments of current command. */
-    robj **argv;            /* Arguments of current command. */
+    int argc;               /* 当前命令的参数数量，例如：SET key value，即为3 */
+    robj **argv;            /* 当前命令的参数，例如：SET key value */
     int argv_len;           /* Size of argv array (may be more than argc) */
     int original_argc;      /* Num of arguments of original command if arguments were rewritten. */
     robj **original_argv;   /* Arguments of original command if arguments were rewritten. */
@@ -1581,7 +1591,7 @@ struct redisServer {
     int arch_bits;              /* 32 or 64 depending on sizeof(long) */
     int cronloops;              /* Number of times the cron function run */
     char runid[CONFIG_RUN_ID_SIZE+1];  /* ID always different at every exec. */
-    int sentinel_mode;          /* True if this instance is a Sentinel. */
+    int sentinel_mode;          /* True 如果一个实例是一个Sentienl */
     size_t initial_memory_usage; /* Bytes used after initialization. */
     int always_show_logo;       /* Show logo even for non-stdout logging. */
     int in_exec;                /* Are we inside EXEC? */
@@ -1991,18 +2001,18 @@ struct redisServer {
     mstime_t cmd_time_snapshot; /* Time snapshot of the root execution nesting. */
     size_t blocking_op_nesting; /* Nesting level of blocking operation, used to reset blocked_last_cron. */
     long long blocked_last_cron; /* Indicate the mstime of the last time we did cron jobs from a blocking operation */
-    /* Pubsub */
-    kvstore *pubsub_channels;  /* Map channels to list of subscribed clients */
-    dict *pubsub_patterns;  /* A dict of pubsub_patterns */
+    /* 发布订阅 */
+    kvstore *pubsub_channels;  /* 将channel映射到订阅的客户端列表 */
+    dict *pubsub_patterns;  /* 发布订阅模式的词典 */
     int notify_keyspace_events; /* Events to propagate via Pub/Sub. This is an
                                    xor of NOTIFY_... flags. */
     kvstore *pubsubshard_channels;  /* Map shard channels in every slot to list of subscribed clients */
-    unsigned int pubsub_clients; /* # of clients in Pub/Sub mode */
+    unsigned int pubsub_clients; /* # 位于发布/订阅模式下的客户端 */
     unsigned int watching_clients; /* # of clients are wathcing keys */
-    /* Cluster */
-    int cluster_enabled;      /* Is cluster enabled? */
-    int cluster_port;         /* Set the cluster port for a node. */
-    mstime_t cluster_node_timeout; /* Cluster node timeout. */
+    /* 集群 */
+    int cluster_enabled;      /* 是否打开集群 */
+    int cluster_port;         /* 用于节点的集群端口 */
+    mstime_t cluster_node_timeout; /* 客户端节点的超时时间 */
     mstime_t cluster_ping_interval;    /* A debug configuration for setting how often cluster nodes send ping messages. */
     char *cluster_configfile; /* Cluster auto-generated config file name. */
     struct clusterState *cluster;  /* State of the cluster */

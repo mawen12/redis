@@ -9,10 +9,17 @@
 #include "server.h"
 #include "cluster.h"
 
-/* Structure to hold the pubsub related metadata. Currently used
- * for pubsub and pubsubshard feature. */
+/**
+ * 用于持有订阅发布相关元数据的结构，当前被用于订阅发布和共享订阅发布的功能
+ */
 typedef struct pubsubtype {
+    /**
+     * 是否共享，1：共享，0：不共享
+     */
     int shard;
+    /**
+     * 
+     */
     dict *(*clientPubSubChannels)(client*);
     int (*subscriptionCount)(client*);
     kvstore **serverPubSubChannels;
@@ -78,21 +85,34 @@ pubsubtype pubSubShardType = {
  * Pubsub client replies API
  *----------------------------------------------------------------------------*/
 
-/* Send a pubsub message of type "message" to the client.
- * Normally 'msg' is a Redis object containing the string to send as
- * message. However if the caller sets 'msg' as NULL, it will be able
- * to send a special message (for instance an Array type) by using the
- * addReply*() API family. */
+/**
+ * 发送一条消息类型的 pubsub 消息给客户端。
+ * 如果参数'msg'被设置为NULL，通过使用 addReply*() API家族也能能够发送
+ * 特殊消息（数组类型的实例）。
+ * 
+ * @param c
+ * @param channel 通道
+ * @param msg 包含要发送字符串的Redis对象
+ * @param message_bulk  
+ */
 void addReplyPubsubMessage(client *c, robj *channel, robj *msg, robj *message_bulk) {
     uint64_t old_flags = c->flags;
     c->flags |= CLIENT_PUSHING;
+
     if (c->resp == 2)
+        // 处理客户端是第二版协议的情况
         addReply(c,shared.mbulkhdr[3]);
     else
+        // 处理客户端时第三版协议的情况
         addReplyPushLen(c,3);
+    // 将消息批写入
     addReply(c,message_bulk);
+    // 将消息通道写入
     addReplyBulk(c,channel);
+
+    // 如果消息不为空，则将消息写入
     if (msg) addReplyBulk(c,msg);
+
     if (!(old_flags & CLIENT_PUSHING)) c->flags &= ~CLIENT_PUSHING;
 }
 
@@ -233,8 +253,12 @@ void unmarkClientAsPubSub(client *c) {
     }
 }
 
-/* Subscribe a client to a channel. Returns 1 if the operation succeeded, or
- * 0 if the client was already subscribed to that channel. */
+/**
+ * 将客户端订阅到频道。
+ * 
+ * @retval 1 订阅成功
+ * @retval 0 该客户端已经订阅
+ */
 int pubsubSubscribeChannel(client *c, robj *channel, pubsubtype type) {
     dictEntry *de, *existing;
     dict *clients = NULL;
@@ -447,26 +471,37 @@ int pubsubUnsubscribeAllPatterns(client *c, int notify) {
     return count;
 }
 
-/*
- * Publish a message to all the subscribers.
+/**
+ * 将一条消息发布到所有的订阅者
+ * 
+ * @param channel 通道
+ * @param message 消息
+ * @param type
  */
 int pubsubPublishMessageInternal(robj *channel, robj *message, pubsubtype type) {
-    int receivers = 0;
+    int receivers = 0; // 消息接收者数量
     dictEntry *de;
     dictIterator *di;
     unsigned int slot = 0;
 
-    /* Send to clients listening for that channel */
+    // 将消息发送到监听该channel的客户端
     if (server.cluster_enabled && type.shard) {
+        // 对于集群模式和共享的发布类型，计算消息的操ID
         slot = keyHashSlot(channel->ptr, sdslen(channel->ptr));
     }
+    // 从发布订阅通道中找到位于该槽位下，订阅该channel的条目，其中包含订阅该客户端的列表
     de = kvstoreDictFind(*type.serverPubSubChannels, slot, channel);
     if (de) {
+        // 获取订阅该客户端的所有列表
         dict *clients = dictGetVal(de);
         dictEntry *entry;
+        // 将列表转换为迭代器
         dictIterator *iter = dictGetIterator(clients);
+        // 迭代客户端列表
         while ((entry = dictNext(iter)) != NULL) {
+            // 获取迭代器中的客户端
             client *c = dictGetKey(entry);
+            // 
             addReplyPubsubMessage(c,channel,message,*type.messageBulk);
             updateClientMemUsageAndBucket(c);
             receivers++;
@@ -507,7 +542,13 @@ int pubsubPublishMessageInternal(robj *channel, robj *message, pubsubtype type) 
     return receivers;
 }
 
-/* Publish a message to all the subscribers. */
+/**
+ * 将一条消息发布到所有的订阅者
+ * 
+ * @param channel 通道
+ * @param message 消息
+ * @param shared 是否共享，1：共享，0：非共享
+ */
 int pubsubPublishMessage(robj *channel, robj *message, int sharded) {
     return pubsubPublishMessageInternal(channel, message, sharded? pubSubShardType : pubSubType);
 }
@@ -516,22 +557,30 @@ int pubsubPublishMessage(robj *channel, robj *message, int sharded) {
  * Pubsub commands implementation
  *----------------------------------------------------------------------------*/
 
-/* SUBSCRIBE channel [channel ...] */
+/**
+ * SUBSCRIBE命令入口
+ * 
+ * 命令格式：SUBSCRIBE channel [channel ...]
+ * 
+ * @param c 携带命令的客户端
+ */
 void subscribeCommand(client *c) {
     int j;
     if ((c->flags & CLIENT_DENY_BLOCKING) && !(c->flags & CLIENT_MULTI)) {
         /**
-         * A client that has CLIENT_DENY_BLOCKING flag on
-         * expect a reply per command and so can not execute subscribe.
-         *
-         * Notice that we have a special treatment for multi because of
-         * backward compatibility
+         * 对于具有 CLIENT_DENY_BLOCKING 表示的客户端期待每个命令都有对应回复。
+         * 因此不能执行 SUBSCIRBE 命令。
+         * 
+         * 请注意，由于向后兼容，我们对 MULTI 有特殊处理。
          */
         addReplyError(c, "SUBSCRIBE isn't allowed for a DENY BLOCKING client");
         return;
     }
+    // j = 1，即跳过第一个命令 SUBSCRIBE，获取之后的所有channel
     for (j = 1; j < c->argc; j++)
+        // 
         pubsubSubscribeChannel(c,c->argv[j],pubSubType);
+    // 
     markClientAsPubSub(c);
 }
 
@@ -585,25 +634,51 @@ void punsubscribeCommand(client *c) {
     }
 }
 
-/* This function wraps pubsubPublishMessage and also propagates the message to cluster.
- * Used by the commands PUBLISH/SPUBLISH and their respective module APIs.*/
+/**
+ * 该函数将 pubsubPublishMessage 和 传播消息到集群 的两个行为封装在一起。
+ * 被命令 PUBLISH/SPUBLISH 和它们各自的模块API所使用
+ * 
+ * @param channel 通道
+ * @param message 消息
+ */
 int pubsubPublishMessageAndPropagateToCluster(robj *channel, robj *message, int sharded) {
+    // 将消息发布到指定channel
     int receivers = pubsubPublishMessage(channel, message, sharded);
+
+    // 开启集群时，将消息传播到其他节点
     if (server.cluster_enabled)
         clusterPropagatePublish(channel, message, sharded);
+
+    // 返回当前节点的消息接受者数量
     return receivers;
 }
 
-/* PUBLISH <channel> <message> */
+/**
+ * PUBLISH 命令入口
+ * 
+ * 命令格式：PUBLISH channel message
+ * 
+ * @param c 携带命令的客户端
+ */
 void publishCommand(client *c) {
+    // 如果当前实例是sentinel，则使用专属的发布命令
     if (server.sentinel_mode) {
         sentinelPublishCommand(c);
         return;
     }
 
+    /**
+     * 发布消息并传播到集群
+     * 
+     * c->argv[1]: channel
+     * c->argv[2]: message
+     */
     int receivers = pubsubPublishMessageAndPropagateToCluster(c->argv[1],c->argv[2],0);
+    // 如果未开启集群，则强制命令传播
     if (!server.cluster_enabled)
         forceCommandPropagation(c,PROPAGATE_REPL);
+    
+    // 答复
     addReplyLongLong(c,receivers);
 }
 

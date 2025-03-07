@@ -29,6 +29,9 @@
 typedef struct dictEntry dictEntry; /* opaque */
 typedef struct dict dict;
 
+/**
+ * 字典类型
+ */
 typedef struct dictType {
     /* Callbacks */
     uint64_t (*hashFunction)(const void *key);
@@ -93,7 +96,13 @@ typedef struct dictType {
 #define DICTHT_SIZE(exp) ((exp) == -1 ? 0 : (unsigned long)1<<(exp))
 #define DICTHT_SIZE_MASK(exp) ((exp) == -1 ? 0 : (DICTHT_SIZE(exp))-1)
 
+/**
+ * 字典结构
+ */
 struct dict {
+    /**
+     * 字典类型
+     */
     dictType *type;
 
     dictEntry **ht_table[2];

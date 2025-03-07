@@ -155,8 +155,9 @@ robj *lookupKeyReadWithFlags(redisDb *db, robj *key, int flags) {
     return lookupKey(db, key, flags);
 }
 
-/* Like lookupKeyReadWithFlags(), but does not use any flag, which is the
- * common case. */
+/**
+ * 类似于 lookupKeyReadWithFlags()，但是不会使用任何标识，这是常见的场景。
+ */
 robj *lookupKeyRead(redisDb *db, robj *key) {
     return lookupKeyReadWithFlags(db,key,LOOKUP_NONE);
 }
@@ -171,11 +172,22 @@ robj *lookupKeyWriteWithFlags(redisDb *db, robj *key, int flags) {
     return lookupKey(db, key, flags | LOOKUP_WRITE);
 }
 
+/**
+ * 查找键用于写操作
+ */
 robj *lookupKeyWrite(redisDb *db, robj *key) {
     return lookupKeyWriteWithFlags(db, key, LOOKUP_NONE);
 }
 
+/**
+ * 根据键查找值
+ * 
+ * @param c 持有关联数据库
+ * @param key 键
+ * @param reply 
+ */
 robj *lookupKeyReadOrReply(client *c, robj *key, robj *reply) {
+    // 从客户端指定的数据库中查找键的值
     robj *o = lookupKeyRead(c->db, key);
     if (!o) addReplyOrErrorObject(c, reply);
     return o;
@@ -384,7 +396,9 @@ void setKey(client *c, redisDb *db, robj *key, robj *val, int flags) {
 robj *dbRandomKey(redisDb *db) {
     // 保存要返回的字典条目
     dictEntry *de;
+    // 最大尝试次数
     int maxtries = 100;
+    // 
     int allvolatile = kvstoreSize(db->keys) == kvstoreSize(db->expires);
 
     while(1) {
@@ -1944,9 +1958,17 @@ void swapdbCommand(client *c) {
 }
 
 /*-----------------------------------------------------------------------------
- * Expires API
+ * 过期 API
  *----------------------------------------------------------------------------*/
 
+/**
+ * 移除指定数据库上键的过期时间
+ * 
+ * @param db 数据库
+ * @param key 键
+ * @retval 1 删除成功
+ * @retval 0 删除失败
+ */
 int removeExpire(redisDb *db, robj *key) {
     return kvstoreDictDelete(db->expires, getKeySlot(key->ptr), key->ptr) == DICT_OK;
 }

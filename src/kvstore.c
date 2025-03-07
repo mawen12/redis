@@ -871,10 +871,22 @@ void kvstoreDictTwoPhaseUnlinkFree(kvstore *kvs, int didx, dictEntry *he, dictEn
     freeDictIfNeeded(kvs, didx);
 }
 
+/**
+ * 从指定的键值存储中指定索引删除指定键
+ * 
+ * @param kvs 键值存储
+ * @param didx 索引
+ * @param key 需要删除的键
+ * @retval DICT_ERR 键值存储中指定索引不存在数据
+ * @retval DICT_OK 
+ */
 int kvstoreDictDelete(kvstore *kvs, int didx, const void *key) {
+    // 获取索引上的字典
     dict *d = kvstoreGetDict(kvs, didx);
+    // 如果不存在，直接返回
     if (!d)
         return DICT_ERR;
+    // 从字典上删除键
     int ret = dictDelete(d, key);
     if (ret == DICT_OK) {
         cumulativeKeyCountAdd(kvs, didx, -1);

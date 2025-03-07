@@ -562,6 +562,13 @@ void decrRefCountVoid(void *o) {
     decrRefCount(o);
 }
 
+/**
+ * 检查值的类型
+ * 
+ * @param c 用于传输返回参数的客户端
+ * @param o 目标对象
+ * @param type 对应类型
+ */
 int checkType(client *c, robj *o, int type) {
     /* NULL 被视作空key */
     if (o && o->type != type) {
@@ -850,6 +857,14 @@ int getLongDoubleFromObjectOrReply(client *c, robj *o, long double *target, cons
     return C_OK;
 }
 
+/**
+ * 获取对象的长度
+ * 
+ * @param o 对象
+ * @param target 保存长度的对象
+ * @retval C_ERR 长度为0
+ * @retval C_OK 成功
+ */
 int getLongLongFromObject(robj *o, long long *target) {
     long long value;
 
@@ -869,8 +884,20 @@ int getLongLongFromObject(robj *o, long long *target) {
     return C_OK;
 }
 
+/**
+ * 从对象上获取其长度，如果失败，则将写入错误回复客户端
+ * 
+ * @param c 用于写入错误信息的客户端
+ * @param o 对象
+ * @param target 从对象上获取的长度
+ * @param msg 错误信息
+ * 
+ * @retval C_ERR 获取长度错误
+ * @retval C_OK 操作成功
+ */
 int getLongLongFromObjectOrReply(client *c, robj *o, long long *target, const char *msg) {
     long long value;
+    // 获取对象长度
     if (getLongLongFromObject(o, &value) != C_OK) {
         if (msg != NULL) {
             addReplyError(c,(char*)msg);
