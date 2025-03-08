@@ -182,7 +182,9 @@ static void _dictReset(dict *d, int htidx)
     d->ht_used[htidx] = 0;
 }
 
-/* Create a new hash table */
+/**
+ * 创建一个新的hash table
+ */
 dict *dictCreate(dictType *type)
 {
     size_t metasize = type->dictMetadataBytes ? type->dictMetadataBytes(NULL) : 0;

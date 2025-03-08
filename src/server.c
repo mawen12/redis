@@ -466,17 +466,19 @@ dictType objectKeyHeapPointerValueDictType = {
     NULL                       /* allow to expand */
 };
 
-/* Set dictionary type. Keys are SDS strings, values are not used. */
+/**
+ * Set的字典类型，键是SDS字符串，不使用值。
+ */
 dictType setDictType = {
-    dictSdsHash,               /* hash function */
-    NULL,                      /* key dup */
-    NULL,                      /* val dup */
-    dictSdsKeyCompare,         /* key compare */
-    dictSdsDestructor,         /* key destructor */
-    NULL,                      /* val destructor */
-    NULL,                      /* allow to expand */
-    .no_value = 1,             /* no values in this dict */
-    .keys_are_odd = 1          /* an SDS string is always an odd pointer */
+    dictSdsHash,               /* hash 函数 */
+    NULL,                      /* 键复制 */
+    NULL,                      /* 值复制 */
+    dictSdsKeyCompare,         /* 键比较 */
+    dictSdsDestructor,         /* 键析构函数 */
+    NULL,                      /* 值析构函数 */
+    NULL,                      /* 允许扩展 */
+    .no_value = 1,             /* 此字典中无值 */
+    .keys_are_odd = 1          /* SDS字符串始终是奇数指针 */
 };
 
 /* Sorted sets hash (note: a skiplist is used in addition to the hash table) */

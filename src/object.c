@@ -225,7 +225,11 @@ robj *createListListpackObject(void) {
     return o;
 }
 
+/**
+ * 创建一个空的Set对象
+ */
 robj *createSetObject(void) {
+    // 创建字典
     dict *d = dictCreate(&setDictType);
     robj *o = createObject(OBJ_SET,d);
     o->encoding = OBJ_ENCODING_HT;
@@ -568,6 +572,9 @@ void decrRefCountVoid(void *o) {
  * @param c 用于传输返回参数的客户端
  * @param o 目标对象
  * @param type 对应类型
+ * 
+ * @retval 1 类型错误
+ * @retval 0 类型正确
  */
 int checkType(client *c, robj *o, int type) {
     /* NULL 被视作空key */
@@ -780,11 +787,21 @@ int equalStringObjects(robj *a, robj *b) {
     }
 }
 
+/**
+ * 计算String对象的长度
+ * 
+ * @param o String对象
+ * @retval size_t 对象的长度
+ */
 size_t stringObjectLen(robj *o) {
+    // 检查对象类型必须为 STRING
     serverAssertWithInfo(NULL,o,o->type == OBJ_STRING);
+
     if (sdsEncodedObject(o)) {
+        // 计算字符串的长度
         return sdslen(o->ptr);
     } else {
+        // 计算数值的长度
         return sdigits10((long)o->ptr);
     }
 }

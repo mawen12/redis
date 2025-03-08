@@ -10,26 +10,29 @@
 #include "intset.h"  /* Compact integer set structure */
 
 /*-----------------------------------------------------------------------------
- * Set Commands
+ * Set 命令集合
  *----------------------------------------------------------------------------*/
 
 void sunionDiffGenericCommand(client *c, robj **setkeys, int setnum,
                               robj *dstkey, int op);
 
-/* Factory method to return a set that *can* hold "value". When the object has
- * an integer-encodable value, an intset will be returned. Otherwise a listpack
- * or a regular hash table.
- *
- * The size hint indicates approximately how many items will be added which is
- * used to determine the initial representation. */
+/**
+ * 返回可以保存value的set对象的工厂方法。当对象存在数字编码的值，将返回 intset。
+ * 否则是一个listpack或常规hash table。
+ * 
+ * size_hint参数指明大约将添加多少个元素，用于确定初始表示。
+ * 
+ * @param value 
+ * @param size_hint 元素的数量
+ */
 robj *setTypeCreate(sds value, size_t size_hint) {
     if (isSdsRepresentableAsLongLong(value,NULL) == C_OK && size_hint <= server.set_max_intset_entries)
         return createIntsetObject();
     if (size_hint <= server.set_max_listpack_entries)
         return createSetListpackObject();
 
-    /* We may oversize the set by using the hint if the hint is not accurate,
-     * but we will assume this is acceptable to maximize performance. */
+    // 假设提示不准确，我们可能会使用该提示来增大集合的大小，但我们会假设这是可接受的，以最大限度地提高性能
+    
     robj *o = createSetObject();
     dictExpand(o->ptr, size_hint);
     return o;
@@ -580,14 +583,24 @@ robj *setTypeDup(robj *o) {
     return set;
 }
 
+/**
+ * SADD命令入口
+ * 
+ * 命令格式：SADD key member [member ...]
+ * 
+ * @param c 携带命令的客户端
+ */
 void saddCommand(client *c) {
     robj *set;
     int j, added = 0;
 
+    // 读取key
     set = lookupKeyWrite(c->db,c->argv[1]);
+    // 检查类型为SET
     if (checkType(c,set,OBJ_SET)) return;
     
     if (set == NULL) {
+        // 不存在时，使用memebr创建set对象
         set = setTypeCreate(c->argv[2]->ptr, c->argc - 2);
         dbAdd(c->db,c->argv[1],set);
     } else {

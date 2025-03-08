@@ -13,9 +13,17 @@
 int getGenericCommand(client *c);
 
 /*-----------------------------------------------------------------------------
- * String Commands
+ * String 命令集合
  *----------------------------------------------------------------------------*/
 
+/**
+ * 检查添加长度后的字符串长度是否超过了限制
+ * 
+ * @param c 回写错误信息
+ * @param size 当前大小
+ * @param append 追加大小
+ * @retval C_OK 
+ */
 static int checkStringLength(client *c, long long size, long long append) {
     if (mustObeyClient(c))
         return C_OK;
@@ -731,18 +739,20 @@ void incrDecrCommand(client *c, long long incr) {
     // 增加值
     value += incr;
 
-    // 
+    // 如果没有被其他所引用，则直接修改当前值
     if (o && o->refcount == 1 && o->encoding == OBJ_ENCODING_INT &&
         (value < 0 || value >= OBJ_SHARED_INTEGERS) &&
         value >= LONG_MIN && value <= LONG_MAX)
     {
         new = o;
         o->ptr = (void*)((long)value);
-    } else {
+    } else { // 已被其他所引用，则在此基础上创建新的对象
         new = createStringObjectFromLongLongForValue(value);
         if (o) {
+            // 原先值存在，则进行替换
             dbReplaceValue(c->db,c->argv[1],new);
         } else {
+            // 原先值不存在，新添加
             dbAdd(c->db,c->argv[1],new);
         }
     }
@@ -760,6 +770,7 @@ void incrDecrCommand(client *c, long long incr) {
  * @param c 携带命令的客户端
  */
 void incrCommand(client *c) {
+    // 增加1
     incrDecrCommand(c,1);
 }
 
@@ -767,85 +778,138 @@ void incrCommand(client *c) {
  * DECR命令入口
  * 
  * 命令格式：DECR
+ * 
+ * @param c 携带命令的客户端
  */
 void decrCommand(client *c) {
+    // 减去1
     incrDecrCommand(c,-1);
 }
 
+/**
+ * INCRBY命令入口
+ * 
+ * 命令格式：INCRBY key decrement
+ * 
+ * @param c 携带命令的客户端
+ */
 void incrbyCommand(client *c) {
     long long incr;
 
-    if (getLongLongFromObjectOrReply(c, c->argv[2], &incr, NULL) != C_OK) return;
+    // 从参数increment中提取long long
+    if (getLongLongFromObjectOrReply(c, c->argv[2], &incr, NULL) != C_OK) 
+        return;
+
+    // 执行递增
     incrDecrCommand(c,incr);
 }
 
+/**
+ * DECRBY命令入口
+ * 
+ * 命令格式：DECRBY key decrement
+ * 
+ * @param c 携带命令的客户端
+ */
 void decrbyCommand(client *c) {
     long long incr;
 
-    if (getLongLongFromObjectOrReply(c, c->argv[2], &incr, NULL) != C_OK) return;
-    /* Overflow check: negating LLONG_MIN will cause an overflow */
+    // 从参数decrement中提取long long
+    if (getLongLongFromObjectOrReply(c, c->argv[2], &incr, NULL) != C_OK) 
+        return;
+    
+    // 溢出检查：负 LLONG_MIN 将导致溢出
     if (incr == LLONG_MIN) {
         addReplyError(c, "decrement would overflow");
         return;
     }
+
+    // 执行递减
     incrDecrCommand(c,-incr);
 }
 
+/**
+ * INCRBYFLOAT命令入口
+ * 
+ * 命令格式：INCRBYFLOAT key increment
+ * 
+ * @param c 携带命令的客户端
+ */
 void incrbyfloatCommand(client *c) {
     long double incr, value;
     robj *o, *new;
 
+    // 获取参数key对应的值
     o = lookupKeyWrite(c->db,c->argv[1]);
-    if (checkType(c,o,OBJ_STRING)) return;
+
+    // 如果值类型不是OBJ_STRING，则直接返回
+    if (checkType(c,o,OBJ_STRING)) 
+        return;
+
+    // 从对象上解析long double，并从参数increment中解析long double，只要有一个出错，则立刻返回
     if (getLongDoubleFromObjectOrReply(c,o,&value,NULL) != C_OK ||
         getLongDoubleFromObjectOrReply(c,c->argv[2],&incr,NULL) != C_OK)
         return;
 
+    // 累加
     value += incr;
+    // 如果值非法，则直接返回
     if (isnan(value) || isinf(value)) {
         addReplyError(c,"increment would produce NaN or Infinity");
         return;
     }
+    // 创建新的对象
     new = createStringObjectFromLongDouble(value,1);
     if (o)
+        // 对象已存在，则更新
         dbReplaceValue(c->db,c->argv[1],new);
     else
+        // 对象不存在，则新增
         dbAdd(c->db,c->argv[1],new);
+
     signalModifiedKey(c,c->db,c->argv[1]);
     notifyKeyspaceEvent(NOTIFY_STRING,"incrbyfloat",c->argv[1],c->db->id);
     server.dirty++;
     addReplyBulk(c,new);
 
-    /* Always replicate INCRBYFLOAT as a SET command with the final value
-     * in order to make sure that differences in float precision or formatting
-     * will not create differences in replicas or after an AOF restart. */
+    // 始终将 INCRBYFLOAT 作为具有最终值的 SET 命令进行复制，以确保浮点精度或格式的差异
+    // 不会在副本中或AOF重启后产生差异
     rewriteClientCommandArgument(c,0,shared.set);
     rewriteClientCommandArgument(c,2,new);
     rewriteClientCommandArgument(c,3,shared.keepttl);
 }
 
+/**
+ * APPEND命令入口
+ * 
+ * 命令格式：APPEND key value
+ * 
+ * @param c 携带命令的客户端
+ */
 void appendCommand(client *c) {
     size_t totlen;
     robj *o, *append;
 
+    // 获取参数key对应的值
     o = lookupKeyWrite(c->db,c->argv[1]);
     if (o == NULL) {
-        /* Create the key */
+        // 创建key
         c->argv[2] = tryObjectEncoding(c->argv[2]);
         dbAdd(c->db,c->argv[1],c->argv[2]);
         incrRefCount(c->argv[2]);
         totlen = stringObjectLen(c->argv[2]);
     } else {
-        /* Key exists, check type */
+        // key已存在，检查类型
         if (checkType(c,o,OBJ_STRING))
             return;
 
-        /* "append" is an argument, so always an sds */
+        // 读取append参数，其总是为sds
         append = c->argv[2];
+        // 检查长度合法
         if (checkStringLength(c,stringObjectLen(o),sdslen(append->ptr)) != C_OK)
             return;
 
-        /* Append the value */
+        // 追加值
         o = dbUnshareStringValue(c->db,c->argv[1],o);
         o->ptr = sdscatlen(o->ptr,append->ptr,sdslen(append->ptr));
         totlen = sdslen(o->ptr);
@@ -856,10 +920,20 @@ void appendCommand(client *c) {
     addReplyLongLong(c,totlen);
 }
 
+/**
+ * STRLEN命令入口
+ * 
+ * 命令格式：STRLEN key
+ * 
+ * @param c 携带命令的客户端
+ */
 void strlenCommand(client *c) {
     robj *o;
-    if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.czero)) == NULL ||
-        checkType(c,o,OBJ_STRING)) return;
+    // 读取key
+    // 如果key不存在，或类型错误，直接返回
+    if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.czero)) == NULL || checkType(c,o,OBJ_STRING)) 
+        return;
+    // 返回长度
     addReplyLongLong(c,stringObjectLen(o));
 }
 

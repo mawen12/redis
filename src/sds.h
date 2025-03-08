@@ -50,20 +50,27 @@ struct __attribute__ ((__packed__)) sdshdr64 {
     char buf[];
 };
 
-#define SDS_TYPE_5  0
-#define SDS_TYPE_8  1
-#define SDS_TYPE_16 2
-#define SDS_TYPE_32 3
-#define SDS_TYPE_64 4
-#define SDS_TYPE_MASK 7
-#define SDS_TYPE_BITS 3
+#define SDS_TYPE_5  0   /* 0000 */
+#define SDS_TYPE_8  1   /* 0001 */
+#define SDS_TYPE_16 2   /* 0010 */
+#define SDS_TYPE_32 3   /* 0011 */
+#define SDS_TYPE_64 4   /* 0100 */
+#define SDS_TYPE_MASK 7 /* 0111 */
+#define SDS_TYPE_BITS 3 /* 0011 */
 #define SDS_HDR_VAR(T,s) struct sdshdr##T *sh = (void*)((s)-(sizeof(struct sdshdr##T)));
 #define SDS_HDR(T,s) ((struct sdshdr##T *)((s)-(sizeof(struct sdshdr##T))))
 #define SDS_TYPE_5_LEN(f) ((f)>>SDS_TYPE_BITS)
 
+/**
+ * 计算sds的长度
+ * 
+ * @param s sds对象
+ * @retval size_t sds的长度
+ */
 static inline size_t sdslen(const sds s) {
+    // 读取最后一位
     unsigned char flags = s[-1];
-    switch(flags&SDS_TYPE_MASK) {
+    switch(flags&SDS_TYPE_MASK) { // 检查是否为SDS类型
         case SDS_TYPE_5:
             return SDS_TYPE_5_LEN(flags);
         case SDS_TYPE_8:
