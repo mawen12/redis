@@ -32,15 +32,18 @@ robj *setTypeCreate(sds value, size_t size_hint) {
         return createSetListpackObject();
 
     // 假设提示不准确，我们可能会使用该提示来增大集合的大小，但我们会假设这是可接受的，以最大限度地提高性能
-    
+    // 创建Redis对象
     robj *o = createSetObject();
+    // 调整大小
     dictExpand(o->ptr, size_hint);
     return o;
 }
 
-/* Check if the existing set should be converted to another encoding based off the
- * the size hint. */
+/**
+ * 检查是否应根据大小提示将现有集合转换为另一种编码
+ */
 void setTypeMaybeConvert(robj *set, size_t size_hint) {
+    // 如果是 LISTAPCK 或 INTSET 编码，且大小均超出了它们原有大小，则转换为 HT 编码
     if ((set->encoding == OBJ_ENCODING_LISTPACK && size_hint > server.set_max_listpack_entries)
         || (set->encoding == OBJ_ENCODING_INTSET && size_hint > server.set_max_intset_entries))
     {
@@ -90,10 +93,16 @@ static void maybeConvertToIntset(robj *set) {
     set->encoding = OBJ_ENCODING_INTSET;
 }
 
-/* Add the specified sds value into a set.
- *
- * If the value was already member of the set, nothing is done and 0 is
- * returned, otherwise the new element is added and 1 is returned. */
+/**
+ * 添加特定的SDS值到Set集合。
+ * 
+ * 如果值已经存在于Set中，不会执行任何操作，并返回0；否则其将被添加，并返回1。
+ * 
+ * @param subject Set集合对象
+ * @param value SDS值
+ * @retval 0 添加失败，元素已存在
+ * @retval 1 添加成功
+ */
 int setTypeAdd(robj *subject, sds value) {
     return setTypeAddAux(subject, value, sdslen(value), 0, 1);
 }
@@ -210,8 +219,15 @@ int setTypeAddAux(robj *set, char *str, size_t len, int64_t llval, int str_is_sd
     return 0;
 }
 
-/* Deletes a value provided as an sds string from the set. Returns 1 if the
- * value was deleted and 0 if it was not a member of the set. */
+/**
+ * 从set中删除以sds字符串形式提供的值。
+ * 
+ * @param setobj Set集合
+ * @param value 值
+ * 
+ * @retval 0 值不存在，无法删除
+ * @retval 1 删除成功
+ */
 int setTypeRemove(robj *setobj, sds value) {
     return setTypeRemoveAux(setobj, value, sdslen(value), 0, 1);
 }
@@ -263,8 +279,14 @@ int setTypeRemoveAux(robj *setobj, char *str, size_t len, int64_t llval, int str
     return 0;
 }
 
-/* Check if an sds string is a member of the set. Returns 1 if the value is a
- * member of the set and 0 if it isn't. */
+/**
+ * 检查SDS字符串是否存在于Set。
+ * 
+ * @param subject Set对象
+ * @param value 字符串
+ * @retval 0 值不存在
+ * @retval 1 值存在
+ */
 int setTypeIsMember(robj *subject, sds value) {
     return setTypeIsMemberAux(subject, value, sdslen(value), 0, 1);
 }
@@ -458,12 +480,21 @@ robj *setTypePopRandom(robj *set) {
     return obj;
 }
 
+/**
+ * 计算给定Set对象的元素个数
+ * 
+ * @param subject Set对象
+ * @retval Set对象中的元素个数
+ */
 unsigned long setTypeSize(const robj *subject) {
-    if (subject->encoding == OBJ_ENCODING_HT) {
+    if (subject->encoding == OBJ_ENCODING_HT) {// 如果是 OBJ_ENCODING_HT 编码类型
+        // 转换为dict，并计算大小
         return dictSize((const dict*)subject->ptr);
-    } else if (subject->encoding == OBJ_ENCODING_INTSET) {
+    } else if (subject->encoding == OBJ_ENCODING_INTSET) {// 如果是 OBJ_ENCODING_INTSET 编码类型
+        // 转换为intset，并计算其长度
         return intsetLen((const intset*)subject->ptr);
-    } else if (subject->encoding == OBJ_ENCODING_LISTPACK) {
+    } else if (subject->encoding == OBJ_ENCODING_LISTPACK) {// 如果是 OBJ_ENCODING_LISTPACK 编码类型
+        // 转换为char，并计算其长度
         return lpLength((unsigned char *)subject->ptr);
     } else {
         serverPanic("Unknown set encoding");
@@ -477,10 +508,11 @@ void setTypeConvert(robj *setobj, int enc) {
     setTypeConvertAndExpand(setobj, enc, setTypeSize(setobj), 1);
 }
 
-/* Converts a set to the specified encoding, pre-sizing it for 'cap' elements.
- * The 'panic' argument controls whether to panic on OOM (panic=1) or return
- * C_ERR on OOM (panic=0). If panic=1 is given, this function always returns
- * C_OK. */
+/**
+ * 将一个Set转换为特定编码，并为cap元素预先调整其大小。
+ * 参数'panic'控制出现OOM时的行为（panic=1，则为panic，panic=0，则返回C_ERR）。
+ * 如果设置了panic=1，该函数总是返回C_OK。
+ */
 int setTypeConvertAndExpand(robj *setobj, int enc, unsigned long cap, int panic) {
     setTypeIterator *si;
     serverAssertWithInfo(NULL,setobj,setobj->type == OBJ_SET &&
@@ -600,16 +632,20 @@ void saddCommand(client *c) {
     if (checkType(c,set,OBJ_SET)) return;
     
     if (set == NULL) {
-        // 不存在时，使用memebr创建set对象
+        // 不存在时，使用memebr创建set对象，并创建实际元素个数的Redis对象
         set = setTypeCreate(c->argv[2]->ptr, c->argc - 2);
+        // 将元素添加到客户端所在的数据库中
         dbAdd(c->db,c->argv[1],set);
     } else {
+        // 将原SET类型根据大小转换编码
         setTypeMaybeConvert(set, c->argc - 2);
     }
 
+    // 将元素依次添加到Set集合中，并对成功添加的操作进行计数
     for (j = 2; j < c->argc; j++) {
         if (setTypeAdd(set,c->argv[j]->ptr)) added++;
     }
+
     if (added) {
         signalModifiedKey(c,c->db,c->argv[1]);
         notifyKeyspaceEvent(NOTIFY_SET,"sadd",c->argv[1],c->db->id);
@@ -618,23 +654,35 @@ void saddCommand(client *c) {
     addReplyLongLong(c,added);
 }
 
+/**
+ * SREM命令入口
+ * 
+ * 命令格式：SREM key member [member ...]
+ * 
+ * @param c 携带命令的客户端
+ */
 void sremCommand(client *c) {
     robj *set;
     int j, deleted = 0, keyremoved = 0;
 
-    if ((set = lookupKeyWriteOrReply(c,c->argv[1],shared.czero)) == NULL ||
-        checkType(c,set,OBJ_SET)) return;
+    // 获取并检查key是否存在，且类型是否为SET
+    if ((set = lookupKeyWriteOrReply(c,c->argv[1],shared.czero)) == NULL || checkType(c,set,OBJ_SET)) 
+        return;
 
     for (j = 2; j < c->argc; j++) {
+        // 从SET中移除值
         if (setTypeRemove(set,c->argv[j]->ptr)) {
+            // 移除成功计数
             deleted++;
-            if (setTypeSize(set) == 0) {
+            if (setTypeSize(set) == 0) {// 如果移除完之后，Set中没有元素了，则从数据库中删除Set
+                // 从数据库中删除key
                 dbDelete(c->db,c->argv[1]);
                 keyremoved = 1;
                 break;
             }
         }
     }
+
     if (deleted) {
         signalModifiedKey(c,c->db,c->argv[1]);
         notifyKeyspaceEvent(NOTIFY_SET,"srem",c->argv[1],c->db->id);
@@ -643,47 +691,57 @@ void sremCommand(client *c) {
                                 c->db->id);
         server.dirty += deleted;
     }
+
     addReplyLongLong(c,deleted);
 }
 
+/**
+ * SMOVE命令入口
+ * 
+ * 命令格式：SMOVE source destination member
+ * 
+ * @param c 携带命令的客户端
+ */
 void smoveCommand(client *c) {
     robj *srcset, *dstset, *ele;
+    // 查找source的SET对象
     srcset = lookupKeyWrite(c->db,c->argv[1]);
+    // 查找destination的SET对象
     dstset = lookupKeyWrite(c->db,c->argv[2]);
     ele = c->argv[3];
 
-    /* If the source key does not exist return 0 */
+    // 如果source key不存在，返回0
     if (srcset == NULL) {
         addReply(c,shared.czero);
         return;
     }
 
-    /* If the source key has the wrong type, or the destination key
-     * is set and has the wrong type, return with an error. */
-    if (checkType(c,srcset,OBJ_SET) ||
-        checkType(c,dstset,OBJ_SET)) return;
+    // 如果source key或destination key不是SET类型，返回错误
+    if (checkType(c,srcset,OBJ_SET) || checkType(c,dstset,OBJ_SET)) 
+        return;
 
-    /* If srcset and dstset are equal, SMOVE is a no-op */
+    // 如果 srcset 和 dstset 相等， 无需执行SMOVE操作
     if (srcset == dstset) {
-        addReply(c,setTypeIsMember(srcset,ele->ptr) ?
-            shared.cone : shared.czero);
+        addReply(c,setTypeIsMember(srcset,ele->ptr) ? shared.cone : shared.czero);
         return;
     }
 
-    /* If the element cannot be removed from the src set, return 0. */
+    // 如果元素无法从 srcset 中移除（即set中不存在该元素），则返回0
     if (!setTypeRemove(srcset,ele->ptr)) {
         addReply(c,shared.czero);
         return;
     }
+    
+    // 发送keyspace事件，指定db中source key执行了srem
     notifyKeyspaceEvent(NOTIFY_SET,"srem",c->argv[1],c->db->id);
 
-    /* Remove the src set from the database when empty */
+    // 当srcset为空时，从数据库中移除
     if (setTypeSize(srcset) == 0) {
         dbDelete(c->db,c->argv[1]);
         notifyKeyspaceEvent(NOTIFY_GENERIC,"del",c->argv[1],c->db->id);
     }
 
-    /* Create the destination set when it doesn't exist */
+    // 如果dstset不存在，则创建该集合
     if (!dstset) {
         dstset = setTypeCreate(ele->ptr, 1);
         dbAdd(c->db,c->argv[2],dstset);
@@ -692,7 +750,7 @@ void smoveCommand(client *c) {
     signalModifiedKey(c,c->db,c->argv[1]);
     server.dirty++;
 
-    /* An extra key has changed when ele was successfully added to dstset */
+    // 当元素成功添加到dstset时，额外的键已发生更改
     if (setTypeAdd(dstset,ele->ptr)) {
         server.dirty++;
         signalModifiedKey(c,c->db,c->argv[2]);
@@ -701,29 +759,44 @@ void smoveCommand(client *c) {
     addReply(c,shared.cone);
 }
 
+/**
+ * SISMEMBER命令入口
+ * 
+ * 命令格式：SISMEMBER key member
+ * 
+ * @param c 携带命令的客户端
+ */
 void sismemberCommand(client *c) {
     robj *set;
 
-    if ((set = lookupKeyReadOrReply(c,c->argv[1],shared.czero)) == NULL ||
-        checkType(c,set,OBJ_SET)) return;
+    // 获取并检查key是否存在，且类型是否为SET
+    if ((set = lookupKeyReadOrReply(c,c->argv[1],shared.czero)) == NULL || checkType(c,set,OBJ_SET)) return;
 
+    // 检查元素是否在Set中存在
     if (setTypeIsMember(set,c->argv[2]->ptr))
         addReply(c,shared.cone);
     else
         addReply(c,shared.czero);
 }
 
+/**
+ * SMISMEMBER命令入口
+ * 
+ * 命令格式：SMISMEMEBR key member [member ...]
+ * 
+ * @param c 携带命令的客户端
+ */
 void smismemberCommand(client *c) {
     robj *set;
     int j;
 
-    /* Don't abort when the key cannot be found. Non-existing keys are empty
-     * sets, where SMISMEMBER should respond with a series of zeros. */
+    // 获取key，如果key不存在，不需要中止。不存在的keys时空集，其中 SMISMEMEBR 应该用一系列0来响应。
     set = lookupKeyRead(c->db,c->argv[1]);
     if (set && checkType(c,set,OBJ_SET)) return;
 
     addReplyArrayLen(c,c->argc - 2);
 
+    // 循环检查member是否存在
     for (j = 2; j < c->argc; j++) {
         if (set && setTypeIsMember(set,c->argv[j]->ptr))
             addReply(c,shared.cone);
@@ -732,11 +805,18 @@ void smismemberCommand(client *c) {
     }
 }
 
+/**
+ * SCARD命令入口
+ * 
+ * 命令格式：SCARD key
+ * 
+ * @param c 携带命令的客户端
+ */
 void scardCommand(client *c) {
     robj *o;
 
-    if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.czero)) == NULL ||
-        checkType(c,o,OBJ_SET)) return;
+    // 如果键不存在或者类型不是SET，则中止
+    if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.czero)) == NULL || checkType(c,o,OBJ_SET)) return;
 
     addReplyLongLong(c,setTypeSize(o));
 }
@@ -956,10 +1036,17 @@ void spopWithCountCommand(client *c) {
     signalModifiedKey(c,c->db,c->argv[1]);
 }
 
+/**
+ * SPOP命令入口
+ * 
+ * 命令格式：SPOP key [count]
+ * 
+ * @param c 携带命令的客户端
+ */
 void spopCommand(client *c) {
     robj *set, *ele;
 
-    if (c->argc == 3) {
+    if (c->argc == 3) {// 参数长度为3，则执行
         spopWithCountCommand(c);
         return;
     } else if (c->argc > 3) {

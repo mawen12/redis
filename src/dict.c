@@ -225,6 +225,17 @@ int _dictInit(dict *d, dictType *type)
 /* Resize or create the hash table,
  * when malloc_failed is non-NULL, it'll avoid panic if malloc fails (in which case it'll be set to 1).
  * Returns DICT_OK if resize was performed, and DICT_ERR if skipped. */
+
+/**
+ * 调整hash table大小或创建哈希表。
+ * 当malloc_failed非空时，如果malloc失败（在这种情况下它将被设置为1）它将避免恐慌。
+ * 
+ * @param d 要被调整的字典
+ * @param size 调整后的大小
+ * @param malloc_failed 
+ * @retval DICT_ERR 调整失败
+ * @retval DICT_OK 调整成功
+ */
 int _dictResize(dict *d, unsigned long size, int* malloc_failed)
 {
     if (malloc_failed) *malloc_failed = 0;
@@ -282,15 +293,24 @@ int _dictResize(dict *d, unsigned long size, int* malloc_failed)
     return DICT_OK;
 }
 
+/**
+ * 字典大小扩展的核心方法
+ * 
+ * @param d 要被扩展的字典
+ * @param size 扩展的目标大小
+ * @param malloc_failed 
+ */
 int _dictExpand(dict *d, unsigned long size, int* malloc_failed) {
-    /* the size is invalid if it is smaller than the size of the hash table 
-     * or smaller than the number of elements already inside the hash table */
+    // 如果参数size小于hash table的大小，或者hash table中元素的个数，则为非法
     if (dictIsRehashing(d) || d->ht_used[0] > size || DICTHT_SIZE(d->ht_size_exp[0]) >= size)
         return DICT_ERR;
+    // 扩展大小
     return _dictResize(d, size, malloc_failed);
 }
 
-/* return DICT_ERR if expand was not performed */
+/**
+ * 将字典扩展到指定大小，如果扩展失败，返回 DICT_ERR
+ */
 int dictExpand(dict *d, unsigned long size) {
     return _dictExpand(d, size, NULL);
 }

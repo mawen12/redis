@@ -19,6 +19,13 @@
 
 /* ===================== Creation and parsing of objects ==================== */
 
+/**
+ * 创建Redis对象
+ * 
+ * @param type 对象类型
+ * @param ptr 值
+ * @retval 创建的对象
+ */
 robj *createObject(int type, void *ptr) {
     robj *o = zmalloc(sizeof(*o));
     o->type = type;
@@ -231,7 +238,9 @@ robj *createListListpackObject(void) {
 robj *createSetObject(void) {
     // 创建字典
     dict *d = dictCreate(&setDictType);
+    // 创建SET类型的Redis对象
     robj *o = createObject(OBJ_SET,d);
+    // 设置编码为hash table
     o->encoding = OBJ_ENCODING_HT;
     return o;
 }
