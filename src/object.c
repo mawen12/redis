@@ -941,10 +941,23 @@ int getLongLongFromObjectOrReply(client *c, robj *o, long long *target, const ch
     return C_OK;
 }
 
+/**
+ * 从对象中获取长度
+ * 
+ * @param c 携带命令的客户端
+ * @param o 
+ * @param target
+ * @param msg
+ * @retval C_OK 获取长度成功
+ * @retval C_ERR 获取长度失败，可能由于长度为0，或越界
+ */
 int getLongFromObjectOrReply(client *c, robj *o, long *target, const char *msg) {
     long long value;
 
-    if (getLongLongFromObjectOrReply(c, o, &value, msg) != C_OK) return C_ERR;
+    // 对象的长度0，返回错误
+    if (getLongLongFromObjectOrReply(c, o, &value, msg) != C_OK)
+        return C_ERR;
+    // 长度越界，返回错误
     if (value < LONG_MIN || value > LONG_MAX) {
         if (msg != NULL) {
             addReplyError(c,(char*)msg);

@@ -107,7 +107,7 @@ typedef struct quicklistBookmark {
 typedef struct quicklist {
     quicklistNode *head; /* 头部节点 */
     quicklistNode *tail; /* 尾部节点 */
-    unsigned long count;        /* 在所有listpack中所有条目的总数目 */
+    unsigned long count;        /* 在所有listpack中所有条目的总数目，即元素总数 */
     unsigned long len;          /* quicklistNodes的数量 */
     signed int fill : QL_FILL_BITS;       /* fill factor for individual nodes */
     unsigned int compress : QL_COMP_BITS; /* depth of end nodes not to compress;0=off */

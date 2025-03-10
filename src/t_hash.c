@@ -588,21 +588,33 @@ unsigned char *hashTypeListpackGetLp(robj *o) {
  * Hash type API
  *----------------------------------------------------------------------------*/
 
-/* Check the length of a number of objects to see if we need to convert a
- * listpack to a real hash. Note that we only check string encoded objects
- * as their string length can be queried in constant time. */
+/**
+ * 检查对象的数量来看我们是否需要从listpack转换到hash table。
+ * 请注意我们仅检查字符串编码对象，因为它们的字符串长度可以在常量时间内查询。
+ * 
+ * @param db 数据库
+ * @param o key的值
+ * @param argb 参数列表指针
+ * @param start 开始索引
+ * @param end 结束索引
+ */
 void hashTypeTryConversion(redisDb *db, robj *o, robj **argv, int start, int end) {
     int i;
     size_t sum = 0;
 
+    // 对于不是 LISTPACK 或 LISTAPCKEX 编码，则已经是 HT，因此无需处理
     if (o->encoding != OBJ_ENCODING_LISTPACK && o->encoding != OBJ_ENCODING_LISTPACK_EX)
         return;
 
-    /* We guess that most of the values in the input are unique, so
-     * if there are enough arguments we create a pre-sized hash, which
-     * might over allocate memory if there are duplicates. */
+    /**
+     * 我们猜测输入中的大多数值都是唯一的，因此如果有足够的参数，
+     * 我们会创建一个预先确定大小的哈希，如果有重复，可能会过度分配内存
+     */
     size_t new_fields = (end - start + 1) / 2;
+
+    // 如果新的字段大于最大的listpack条目时，则满足条件转换
     if (new_fields > server.hash_max_listpack_entries) {
+        // 从 LISTPACK 转换到 HT
         hashTypeConvert(o, OBJ_ENCODING_HT, &db->hexpires);
         dictExpand(o->ptr, new_fields);
         return;
@@ -693,20 +705,18 @@ GetFieldRes hashTypeGetFromHashTable(robj *o, sds field, sds *value, uint64_t *e
     return GETF_OK;
 }
 
-/* Higher level function of hashTypeGet*() that returns the hash value
- * associated with the specified field.
- * Arguments:
- * hfeFlags      - Lookup for HFE_LAZY_* flags
- *
- * Returned:
- * GetFieldRes  - Result of get operation
- * vstr, vlen   - if string, ref in either *vstr and *vlen if it's
- *                returned in string form,
- * vll          - or stored in *vll if it's returned as a number.
- *                If *vll is populated *vstr is set to NULL, so the caller can
- *                always check the function return by checking the return value
- *                for GETF_OK and checking if vll (or vstr) is NULL.
- *
+/**
+ * hashTypeGet*()的更高级的函数。返回与特定字段关联的哈希值。
+ * 
+ * @param db 数据库
+ * @param o 键对象
+ * @param field 字段字符串
+ * @param vstr 如果是字段，则在vstr和vlen中引用（如果以字符串形式返回）
+ * @param vlen
+ * @param vll 如果是整数，则存储在vll中。如果vll被填充，vstr被设置为NULL，
+ * 因此调用者可以通过检查GETF_OK的返回值并检查vll(或vstr)是否为NULL来检查函数返回
+ * @param hfeflags 查看 HFE_LAZY_* 标识
+ * @retval 
  */
 GetFieldRes hashTypeGetValue(redisDb *db, robj *o, sds field, unsigned char **vstr,
                              unsigned int *vlen, long long *vll, int hfeFlags) {
@@ -714,17 +724,19 @@ GetFieldRes hashTypeGetValue(redisDb *db, robj *o, sds field, unsigned char **vs
     sds key;
     GetFieldRes res;
     if (o->encoding == OBJ_ENCODING_LISTPACK ||
-        o->encoding == OBJ_ENCODING_LISTPACK_EX) {
+        o->encoding == OBJ_ENCODING_LISTPACK_EX) {// 编码为 LISTPACK 或 LISTPACK_EX
         *vstr = NULL;
+        // 从listpack获取字段值
         res = hashTypeGetFromListpack(o, field, vstr, vlen, vll, &expiredAt);
-
+        // 字段不存在，则直接返回        
         if (res == GETF_NOT_FOUND)
             return GETF_NOT_FOUND;
 
-    } else if (o->encoding == OBJ_ENCODING_HT) {
+    } else if (o->encoding == OBJ_ENCODING_HT) {// 编码为 HT
         sds value = NULL;
+        // 从hashtable获取字段值
         res = hashTypeGetFromHashTable(o, field, &value, &expiredAt);
-
+        // 字段不存在，则直接返回
         if (res == GETF_NOT_FOUND)
             return GETF_NOT_FOUND;
 
@@ -734,15 +746,17 @@ GetFieldRes hashTypeGetValue(redisDb *db, robj *o, sds field, unsigned char **vs
         serverPanic("Unknown hash encoding");
     }
 
+    
     if (expiredAt >= (uint64_t) commandTimeSnapshot())
+        // 如果过期时间>当前时间，则代表尚未过期，直接返回
         return GETF_OK;
 
     if (server.masterhost) {
-        /* If CLIENT_MASTER, assume valid as long as it didn't get delete */
+        // 如果该客户端是master，只要没有被删除就认为有效
         if (server.current_client && (server.current_client->flags & CLIENT_MASTER))
             return GETF_OK;
 
-        /* If user client, then act as if expired, but don't delete! */
+        // 如果是用户客户端，则当作过期了，但是不要删除了
         return GETF_EXPIRED;
     }
 
@@ -757,12 +771,12 @@ GetFieldRes hashTypeGetValue(redisDb *db, robj *o, sds field, unsigned char **vs
     else
         key = ((dictExpireMetadata *) dictMetadata((dict*)o->ptr))->key;
 
-    /* delete the field and propagate the deletion */
+    // 删除字段，并传播删除到AOF和副本
     serverAssert(hashTypeDelete(o, field, 1) == 1);
     propagateHashFieldDeletion(db, key, field, sdslen(field));
     server.stat_expired_subkeys++;
 
-    /* If the field is the last one in the hash, then the hash will be deleted */
+    // 如果字段是hash中的最后一个，稍后删除hash
     res = GETF_EXPIRED;
     robj *keyObj = createStringObject(key, sdslen(key));
     if (!(hfeFlags & HFE_LAZY_NO_NOTIFICATION))
@@ -808,21 +822,24 @@ robj *hashTypeGetValueObject(redisDb *db, robj *o, sds field, int hfeFlags, int 
     return NULL;
 }
 
-/* Test if the specified field exists in the given hash. If the field is
- * expired (HFE), then it will be lazy deleted
- *
- * hfeFlags      - Lookup HFE_LAZY_* flags
- * isHashDeleted - If attempted to access expired field and it is the last field
- *                 in the hash, then the hash will as well be deleted. In this case,
- *                 isHashDeleted will be set to 1.
- *
- * Returns 1 if the field exists, and 0 when it doesn't.
+/**
+ * 测试指定字段是否存在于给定哈希中。如果字段过期了，其将被懒删除。
+ * 
+ * @param db 数据库
+ * @param o 键对象
+ * @param field 字段
+ * @param hfeflags 查看 HFE_LAZY_* 标识
+ * @param isHashDeleted 如果尝试访问过期字段，且它是哈希中最后一个字段，
+ * 然后该哈希将被删除。在此案例中，该值将被设置为1。
+ * @retval 0 字段不存在
+ * @retval 1 字段存在
  */
 int hashTypeExists(redisDb *db, robj *o, sds field, int hfeFlags, int *isHashDeleted) {
     unsigned char *vstr = NULL;
     unsigned int vlen = UINT_MAX;
     long long vll = LLONG_MAX;
 
+    // 获取字段的值
     GetFieldRes res = hashTypeGetValue(db, o, field, &vstr, &vlen, &vll, hfeFlags);
     if (isHashDeleted)
         *isHashDeleted = (res == GETF_EXPIRED_HASH) ? 1 : 0;
@@ -1550,13 +1567,17 @@ static robj *hashTypeLookupWriteOrCreate(client *c, robj *key) {
 }
 
 
+/**
+ * 执行哈希类型转换，用于从 LISTAPCK 转换到 HT 编码
+ */
 void hashTypeConvertListpack(robj *o, int enc) {
     serverAssert(o->encoding == OBJ_ENCODING_LISTPACK);
 
+    // 当前编码与目标编码相同，无需转换
     if (enc == OBJ_ENCODING_LISTPACK) {
         /* Nothing to do... */
 
-    } else if (enc == OBJ_ENCODING_LISTPACK_EX) {
+    } else if (enc == OBJ_ENCODING_LISTPACK_EX) {// 如果目标是
         unsigned char *p;
 
         /* Append HASH_LP_NO_TTL to each field name - value pair. */
@@ -1665,11 +1686,19 @@ void hashTypeConvertListpackEx(robj *o, int enc, ebuckets *hexpires) {
     }
 }
 
-/* NOTE: hexpires can be NULL (Won't register in global HFE DS) */
+/**
+ * 执行哈希类型的转换，用于从 LISTPACK/LISTPACK_EX 转换到 HT 编码
+ * 
+ * @param o Key的值
+ * @param enc 编码
+ * @param hexpires 可以为NULL，不会在全局 HFE DS 中注册。
+ */
 void hashTypeConvert(robj *o, int enc, ebuckets *hexpires) {
     if (o->encoding == OBJ_ENCODING_LISTPACK) {
+        // 处理 LISTPACK -> HT
         hashTypeConvertListpack(o, enc);
     } else if (o->encoding == OBJ_ENCODING_LISTPACK_EX) {
+        // 处理 LISTPACK_EX -> HT
         hashTypeConvertListpackEx(o, enc, hexpires);
     } else if (o->encoding == OBJ_ENCODING_HT) {
         serverPanic("Not implemented");
@@ -2128,27 +2157,39 @@ ebuckets *hashTypeGetDictMetaHFE(dict *d) {
 }
 
 /*-----------------------------------------------------------------------------
- * Hash type commands
+ * Hash type 命令集合
  *----------------------------------------------------------------------------*/
 
+/**
+ * HSETNX命令入口
+ * 
+ * 命令格式：HSETNX key field value 
+ * 
+ * @param c 携带命令的客户端
+ */
 void hsetnxCommand(client *c) {
     int isHashDeleted;
     robj *o;
+
+    // Key的值不存在，直接返回
     if ((o = hashTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
 
+    // 如果存在，则直接返回
     if (hashTypeExists(c->db, o, c->argv[2]->ptr, HFE_LAZY_EXPIRE, &isHashDeleted)) {
         addReply(c, shared.czero);
         return;
     }
 
-    /* Field expired and in turn hash deleted. Create new one! */
+    // 字段已过期，哈希值也删除，请创建新的hash
     if (isHashDeleted) {
         o = createHashObject();
         dbAdd(c->db,c->argv[1],o);
     }
 
     hashTypeTryConversion(c->db, o,c->argv,2,3);
+
     hashTypeSet(c->db, o,c->argv[2]->ptr,c->argv[3]->ptr,HASH_SET_COPY);
+
     addReply(c, shared.cone);
     signalModifiedKey(c,c->db,c->argv[1]);
     notifyKeyspaceEvent(NOTIFY_HASH,"hset",c->argv[1],c->db->id);

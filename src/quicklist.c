@@ -183,7 +183,9 @@ REDIS_STATIC quicklistNode *quicklistCreateNode(void) {
     return node;
 }
 
-/* Return cached quicklist count */
+/**
+ * 返回已缓存的quicklist总数
+ */
 unsigned long quicklistCount(const quicklist *ql) { return ql->count; }
 
 /* Free entire quicklist. */

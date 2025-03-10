@@ -214,10 +214,16 @@ robj *listTypePop(robj *subject, int where) {
     return value;
 }
 
+/**
+ * 返回list对象的长度
+ * 
+ * @param subject LIST对象
+ * @retval 长度
+ */
 unsigned long listTypeLength(const robj *subject) {
-    if (subject->encoding == OBJ_ENCODING_QUICKLIST) {
+    if (subject->encoding == OBJ_ENCODING_QUICKLIST) {// QUICKLIST 编码
         return quicklistCount(subject->ptr);
-    } else if (subject->encoding == OBJ_ENCODING_LISTPACK) {
+    } else if (subject->encoding == OBJ_ENCODING_LISTPACK) {// LISTPACK 编码
         return lpLength(subject->ptr);
     } else {
         serverPanic("Unknown list encoding");
@@ -281,9 +287,10 @@ void listTypeReleaseIterator(listTypeIterator *li) {
     zfree(li);
 }
 
-/* Stores pointer to current the entry in the provided entry structure
- * and advances the position of the iterator. Returns 1 when the current
- * entry is in fact an entry, 0 otherwise. */
+/**
+ * 将指针存储到提供的条目结构中的当前条目，并推进迭代器的位置。
+ * 如果当前条目实际上是一个条目，则返回1，否则返回0。
+ */
 int listTypeNext(listTypeIterator *li, listTypeEntry *entry) {
     /* Protect from converting when iterating */
     serverAssert(li->subject->encoding == li->encoding);
@@ -490,8 +497,6 @@ void listTypeDelRange(robj *subject, long start, long count) {
  * List 命令集合
  *----------------------------------------------------------------------------*/
 
-/* Implements LPUSH/RPUSH/LPUSHX/RPUSHX. 
- * 'xx': push if key exists. */
 /**
  * 被 LPUSH/RPUSH/LPUSHX/RPUSHX 所使用的通用命令
  * 
@@ -611,7 +616,6 @@ void linsertCommand(client *c) {
         return;
     }
 
-
     // Key存在且值类型为LIST
     if ((subject = lookupKeyWriteOrReply(c,c->argv[1],shared.czero)) == NULL || checkType(c,subject,OBJ_LIST)) 
         return;
@@ -649,22 +653,41 @@ void linsertCommand(client *c) {
     addReplyLongLong(c,listTypeLength(subject));
 }
 
-/* LLEN <key> */
+/**
+ * LLEN命令入口
+ * 
+ * 命令格式：LLEN key
+ * 
+ * @param c 携带命令的客户端
+ */
 void llenCommand(client *c) {
+    // 查找Key的值
     robj *o = lookupKeyReadOrReply(c,c->argv[1],shared.czero);
+    // 为空或类型非LIST，直接返回
     if (o == NULL || checkType(c,o,OBJ_LIST)) return;
+    
     addReplyLongLong(c,listTypeLength(o));
 }
 
-/* LINDEX <key> <index> */
+/**
+ * LINDEX命令入口
+ * 
+ * 命令格式：LINDEX key index
+ * 
+ * @param c 携带命令的客户端
+ */
 void lindexCommand(client *c) {
+    // 查找Key的值
     robj *o = lookupKeyReadOrReply(c,c->argv[1],shared.null[c->resp]);
+    // 为空或类型非LIST，直接返回
     if (o == NULL || checkType(c,o,OBJ_LIST)) return;
     long index;
 
+    // 获取长度失败，直接返回
     if ((getLongFromObjectOrReply(c, c->argv[2], &index, NULL) != C_OK))
         return;
 
+    // 获取迭代器
     listTypeIterator *iter = listTypeInitIterator(o,index,LIST_TAIL);
     listTypeEntry entry;
     unsigned char *vstr;

@@ -1978,7 +1978,9 @@ struct redisServer {
     int sort_alpha;
     int sort_bypattern;
     int sort_store;
-    /* Zip structure config, see redis.conf for more information  */
+    /**
+     * Zip 结构配置，详细信息请查看 redis.conf 
+     */
     size_t hash_max_listpack_entries;
     size_t hash_max_listpack_value;
     size_t set_max_intset_entries;

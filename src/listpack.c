@@ -514,26 +514,30 @@ unsigned char *lpLast(unsigned char *lp) {
     return lpPrev(lp,p); /* Will return NULL if EOF is the only element. */
 }
 
-/* Return the number of elements inside the listpack. This function attempts
- * to use the cached value when within range, otherwise a full scan is
- * needed. As a side effect of calling this function, the listpack header
- * could be modified, because if the count is found to be already within
- * the 'numele' header field range, the new value is set. */
+/**
+ * 返回listpack中的元素数量。该函数尝试在范围内使用缓存值，否则需要进行全面扫描。
+ * 调用该函数可能造成副作用，即listpack的头可能被修改，因为如果发现计数已经在
+ * 'numele'标题字段范围内，则设置新值。
+ * 
+ * @param lp listpack对象
+ * @retval listpack长度
+ */
 unsigned long lpLength(unsigned char *lp) {
+    // 获取元素个数
     uint32_t numele = lpGetNumElements(lp);
+    // 获取成功，直接返回
     if (numele != LP_HDR_NUMELE_UNKNOWN) return numele;
 
-    /* Too many elements inside the listpack. We need to scan in order
-     * to get the total number. */
+    // 在listpack中有太多元素，为了获取总数，则需要全部扫描
     uint32_t count = 0;
+    // 获取首个元素，从头往尾迭代
     unsigned char *p = lpFirst(lp);
     while(p) {
         count++;
         p = lpNext(lp,p);
     }
 
-    /* If the count is again within range of the header numele field,
-     * set it. */
+    // 如果计数再次在标头numele字段的范围内，则将其设置为值
     if (count < LP_HDR_NUMELE_UNKNOWN) lpSetNumElements(lp,count);
     return count;
 }
@@ -673,6 +677,10 @@ unsigned char *lpGet(unsigned char *p, int64_t *count, unsigned char *intbuf) {
  * Otherwise if the element is encoded as a string a pointer to the string (pointing
  * inside the listpack itself) is returned, and 'slen' is set to the length of the
  * string. */
+/**
+ * 该函数是lpGet()的包装器，能够直接获取条目值。
+ * 当函数返回NULL时，它
+ */
 unsigned char *lpGetValue(unsigned char *p, unsigned int *slen, long long *lval) {
     unsigned char *vstr;
     int64_t ele_len;
@@ -1631,7 +1639,7 @@ unsigned int lpCompare(unsigned char *p, unsigned char *s, uint32_t slen) {
     // 空元素场景
     if (p[0] == LP_EOF) return 0;
 
-    // 获取p的值
+    // 获取p的值和大小
     value = lpGet(p, &sz, NULL);
     if (value) {
         return (slen == sz) && memcmp(value,s,slen) == 0;
