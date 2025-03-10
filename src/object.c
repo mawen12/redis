@@ -225,9 +225,14 @@ robj *createQuicklistObject(int fill, int compress) {
     return o;
 }
 
+/**
+ * 创建List类型的LISTPACK编码的Redis对象
+ */
 robj *createListListpackObject(void) {
     unsigned char *lp = lpNew(0);
+    // 创建类型为 LIST 的对象
     robj *o = createObject(OBJ_LIST,lp);
+    // 指定编码为 LIST_PACK
     o->encoding = OBJ_ENCODING_LISTPACK;
     return o;
 }
@@ -586,7 +591,7 @@ void decrRefCountVoid(void *o) {
  * @retval 0 类型正确
  */
 int checkType(client *c, robj *o, int type) {
-    /* NULL 被视作空key */
+    /* NULL 被视作合法 */
     if (o && o->type != type) {
         /* 类型错误，将返回错误 */
         addReplyErrorObject(c,shared.wrongtypeerr);

@@ -141,22 +141,37 @@ void listTypeTryConversionAppend(robj *o, robj **argv, int start, int end,
  *
  * There is no need for the caller to increment the refcount of 'value' as
  * the function takes care of it if needed. */
+
+/**
+ * 该函数 push 一个元素到参数 subject 中。
+ * 
+ * 调用者无需增加参数value的引用，该函数会负责该工作。
+ * 
+ * @param subject List对象
+ * @param value 元素
+ * @param where list操作位置，可以是头部（LIST_HEAD）或尾部（LIST_TAIL）
+ */
 void listTypePush(robj *subject, robj *value, int where) {
-    if (subject->encoding == OBJ_ENCODING_QUICKLIST) {
+    if (subject->encoding == OBJ_ENCODING_QUICKLIST) {// 处理 QUICKLIST 编码
+        // 根据位置确定基于 QUICKLIST 编码的操作位置
         int pos = (where == LIST_HEAD) ? QUICKLIST_HEAD : QUICKLIST_TAIL;
-        if (value->encoding == OBJ_ENCODING_INT) {
+
+        if (value->encoding == OBJ_ENCODING_INT) {// 如果值是 INT 编码
             char buf[32];
+            // 将long转换为char
             ll2string(buf, 32, (long)value->ptr);
+            // 保存到List中
             quicklistPush(subject->ptr, buf, strlen(buf), pos);
         } else {
+            // 直接保存到list中
             quicklistPush(subject->ptr, value->ptr, sdslen(value->ptr), pos);
         }
-    } else if (subject->encoding == OBJ_ENCODING_LISTPACK) {
-        if (value->encoding == OBJ_ENCODING_INT) {
+    } else if (subject->encoding == OBJ_ENCODING_LISTPACK) {// 处理 LISTPACK 编码
+        if (value->encoding == OBJ_ENCODING_INT) {// 如果值是 INT 编码
             subject->ptr = (where == LIST_HEAD) ?
                 lpPrependInteger(subject->ptr, (long)value->ptr) :
                 lpAppendInteger(subject->ptr, (long)value->ptr);
-        } else {
+        } else {// 非 INT 编码，即字符串编码
             subject->ptr = (where == LIST_HEAD) ?
                 lpPrepend(subject->ptr, value->ptr, sdslen(value->ptr)) :
                 lpAppend(subject->ptr, value->ptr, sdslen(value->ptr));
@@ -209,21 +224,31 @@ unsigned long listTypeLength(const robj *subject) {
     }
 }
 
-/* Initialize an iterator at the specified index. */
+/**
+ * 在指定索引初始化迭代器
+ * 
+ * @param subject 要迭代的集合对象
+ * @param index 开始索引
+ * @param direction 迭代方向
+ * 
+ * @retval 迭代器
+ */
 listTypeIterator *listTypeInitIterator(robj *subject, long index,
                                        unsigned char direction) {
+    // 初始化迭代器                                    
     listTypeIterator *li = zmalloc(sizeof(listTypeIterator));
     li->subject = subject;
     li->encoding = subject->encoding;
     li->direction = direction;
     li->iter = NULL;
-    /* LIST_HEAD means start at TAIL and move *towards* head.
-     * LIST_TAIL means start at HEAD and move *towards* tail. */
-    if (li->encoding == OBJ_ENCODING_QUICKLIST) {
+
+    // LIST_HEAD 意味着从尾部开始，并向头部迭代
+    // LIST_TAIL 意味着从头部开始，并向尾部迭代
+    if (li->encoding == OBJ_ENCODING_QUICKLIST) {// 处理 QUICKLIST 编码
         int iter_direction = direction == LIST_HEAD ? AL_START_TAIL : AL_START_HEAD;
         li->iter = quicklistGetIteratorAtIdx(li->subject->ptr,
                                              iter_direction, index);
-    } else if (li->encoding == OBJ_ENCODING_LISTPACK) {
+    } else if (li->encoding == OBJ_ENCODING_LISTPACK) { // 处理 LISTPACK 编码
         li->lpi = lpSeek(subject->ptr, index);
     } else {
         serverPanic("Unknown list encoding");
@@ -382,12 +407,18 @@ int listTypeReplaceAtIndex(robj *o, int index, robj *value) {
     return replaced;
 }
 
-/* Compare the given object with the entry at the current position. */
+/**
+ * 比较给定对象和当前位置的条目是否相等
+ * 
+ * @param entry 条目
+ * @param o 给定对象
+ */
 int listTypeEqual(listTypeEntry *entry, robj *o) {
     serverAssertWithInfo(NULL,o,sdsEncodedObject(o));
-    if (entry->li->encoding == OBJ_ENCODING_QUICKLIST) {
+
+    if (entry->li->encoding == OBJ_ENCODING_QUICKLIST) {// QUICKLIST 编码
         return quicklistCompare(&entry->entry,o->ptr,sdslen(o->ptr));
-    } else if (entry->li->encoding == OBJ_ENCODING_LISTPACK) {
+    } else if (entry->li->encoding == OBJ_ENCODING_LISTPACK) {// LISTPACK 编码
         return lpCompare(entry->lpe,o->ptr,sdslen(o->ptr));
     } else {
         serverPanic("Unknown list encoding");
@@ -456,60 +487,113 @@ void listTypeDelRange(robj *subject, long start, long count) {
 }
 
 /*-----------------------------------------------------------------------------
- * List Commands
+ * List 命令集合
  *----------------------------------------------------------------------------*/
 
 /* Implements LPUSH/RPUSH/LPUSHX/RPUSHX. 
  * 'xx': push if key exists. */
+/**
+ * 被 LPUSH/RPUSH/LPUSHX/RPUSHX 所使用的通用命令
+ * 
+ * @param c 携带命令的客户端
+ * @param where 操作位置，具体查看server.h#LIST_HEAD/LIST_TAIL
+ * @param xx 是否要求key已存在，0 代表不需要，1 代表必须已存在
+ */
 void pushGenericCommand(client *c, int where, int xx) {
     int j;
 
+    // 从数据库中获取key的值
     robj *lobj = lookupKeyWrite(c->db, c->argv[1]);
-    if (checkType(c,lobj,OBJ_LIST)) return;
+    // 检查非空值必须为LIST
+    if (checkType(c,lobj,OBJ_LIST)) 
+        return;
     if (!lobj) {
         if (xx) {
+            // 值不存在，但是设置了xx=1，则直接返回
             addReply(c, shared.czero);
             return;
         }
 
+        // 创建编码为LISTPACK的LIST对象
         lobj = createListListpackObject();
+        // 将对象关联key，并写入数据库
         dbAdd(c->db,c->argv[1],lobj);
     }
 
     listTypeTryConversionAppend(lobj,c->argv,2,c->argc-1,NULL,NULL);
+
+    // 从索引2开始，将元素设置到给定位置（只能是HEAD或TAIL）
     for (j = 2; j < c->argc; j++) {
         listTypePush(lobj,c->argv[j],where);
         server.dirty++;
     }
 
+    // 添加当前LIST中的元素数量作为答复
     addReplyLongLong(c, listTypeLength(lobj));
 
+    // 触发事件
     char *event = (where == LIST_HEAD) ? "lpush" : "rpush";
     signalModifiedKey(c,c->db,c->argv[1]);
     notifyKeyspaceEvent(NOTIFY_LIST,event,c->argv[1],c->db->id);
 }
 
-/* LPUSH <key> <element> [<element> ...] */
+/**
+ * LPUSH命令入口
+ * 
+ * 命令格式：LPUSH key element [element ...]
+ * 
+ * @param c 携带命令的客户端
+ */
 void lpushCommand(client *c) {
+    // 添加到列表头部，若不存在，则创建
     pushGenericCommand(c,LIST_HEAD,0);
 }
 
-/* RPUSH <key> <element> [<element> ...] */
+/**
+ * RPUSH命令入口
+ * 
+ * 命令格式：RPUSH key element [element ...]
+ * 
+ * @param c 携带命令的客户端
+ */
 void rpushCommand(client *c) {
+    // 添加到列表尾部
     pushGenericCommand(c,LIST_TAIL,0);
 }
 
 /* LPUSHX <key> <element> [<element> ...] */
+
+/**
+ * LPUSHX命令入口
+ * 
+ * 命令格式：LPUSHX key element [element ...]
+ * 
+ * @param c 携带命令的客户端
+ */
 void lpushxCommand(client *c) {
+    // 添加到已存在key对应值的头部
     pushGenericCommand(c,LIST_HEAD,1);
 }
 
-/* RPUSHX <key> <element> [<element> ...] */
+/**
+ * RPUSHX命令入口
+ * 
+ * 命令格式：RPUSHX key element [element ...]
+ * 
+ * @param c 携带命令的客户端
+ */
 void rpushxCommand(client *c) {
+    // 添加到已存在key对应值的尾部
     pushGenericCommand(c,LIST_TAIL,1);
 }
 
-/* LINSERT <key> (BEFORE|AFTER) <pivot> <element> */
+/**
+ * LINSERT命令入口
+ * 
+ * 命令格式：LINSERT key <BEFORE | AFTER> pivot element
+ * 
+ * @param c 携带命令的客户端
+ */
 void linsertCommand(client *c) {
     int where;
     robj *subject;
@@ -517,6 +601,7 @@ void linsertCommand(client *c) {
     listTypeEntry entry;
     int inserted = 0;
 
+    // 根据参数BEFORE/AFTER确定插入位置
     if (strcasecmp(c->argv[2]->ptr,"after") == 0) {
         where = LIST_TAIL;
     } else if (strcasecmp(c->argv[2]->ptr,"before") == 0) {
@@ -526,8 +611,10 @@ void linsertCommand(client *c) {
         return;
     }
 
-    if ((subject = lookupKeyWriteOrReply(c,c->argv[1],shared.czero)) == NULL ||
-        checkType(c,subject,OBJ_LIST)) return;
+
+    // Key存在且值类型为LIST
+    if ((subject = lookupKeyWriteOrReply(c,c->argv[1],shared.czero)) == NULL || checkType(c,subject,OBJ_LIST)) 
+        return;
 
     /* We're not sure if this value can be inserted yet, but we cannot
      * convert the list inside the iterator. We don't want to loop over
@@ -536,10 +623,11 @@ void linsertCommand(client *c) {
      * and convert the listpack to a regular list if necessary. */
     listTypeTryConversionAppend(subject,c->argv,4,4,NULL,NULL);
 
-    /* Seek pivot from head to tail */
+    // 使用构造器从头到尾检索pivot
     iter = listTypeInitIterator(subject,0,LIST_TAIL);
     while (listTypeNext(iter,&entry)) {
-        if (listTypeEqual(&entry,c->argv[3])) {
+        if (listTypeEqual(&entry,c->argv[3])) {// 检查元素是否匹配
+            // 在指定位置插入元素
             listTypeInsert(&entry,c->argv[4],where);
             inserted = 1;
             break;

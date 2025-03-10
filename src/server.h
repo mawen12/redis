@@ -483,9 +483,9 @@ typedef enum {
  * we index some nodes in the replication buffer linked list into a rax. */
 #define REPL_BACKLOG_INDEX_PER_BLOCKS 64
 
-/* List related stuff */
-#define LIST_HEAD 0
-#define LIST_TAIL 1
+/* List 相关内容 */
+#define LIST_HEAD 0 /* List 头部 */
+#define LIST_TAIL 1 /* List 尾部 */
 #define ZSET_MIN 0
 #define ZSET_MAX 1
 
@@ -889,7 +889,7 @@ struct RedisModuleDigest {
 #define OBJ_ENCODING_EMBSTR 8  /* 嵌入式 sds string 编码 */
 #define OBJ_ENCODING_QUICKLIST 9 /* 编码为 listpacks 的 linked list */
 #define OBJ_ENCODING_STREAM 10 /* 编码为 listpacks 的 radix tree */
-#define OBJ_ENCODING_LISTPACK 11 /* 编码为 listpack  */
+#define OBJ_ENCODING_LISTPACK 11 /* 编码为 listpack，可被 list/set 使用  */
 #define OBJ_ENCODING_LISTPACK_EX 12 /* 编码为 listpack, 使用元数据扩展 */
 
 #define LRU_BITS 24

@@ -502,9 +502,16 @@ int quicklistNodeExceedsLimit(int fill, size_t new_sz, unsigned int new_count) {
     redis_unreachable();
 }
 
-/* Determines whether a given size qualifies as a large element based on a threshold
- * determined by the 'fill'. If the size is considered large, it will be stored in
- * a plain node. */
+/**
+ * 确定给定的size是否等于大型元素，根据fill参数作为阈值。
+ * 如果是大型元素，其将被作为普通节点存储。
+ * 
+ * @param sz 给定的大小
+ * @param fill 阈值
+ * 
+ * @retval 0 非大型元素
+ * @retval 1 是大型元素
+ */
 static int isLargeElement(size_t sz, int fill) {
     if (unlikely(packed_threshold != 0)) return sz >= packed_threshold;
     if (fill >= 0)
@@ -576,20 +583,23 @@ static void __quicklistInsertPlainNode(quicklist *quicklist, quicklistNode *old_
     quicklist->count++;
 }
 
-/* Add new entry to head node of quicklist.
- *
- * Returns 0 if used existing head.
- * Returns 1 if new head created. */
+/**
+ * 添加一个条目到quicklist的头节点
+ * 
+ * @retval 0 使用已存在的头节点
+ * @retval 1 创建新的头节点
+ */
 int quicklistPushHead(quicklist *quicklist, void *value, size_t sz) {
+    // 获取头节点
     quicklistNode *orig_head = quicklist->head;
 
     if (unlikely(isLargeElement(sz, quicklist->fill))) {
+        // 如果是大型元素，则作为plain节点插入
         __quicklistInsertPlainNode(quicklist, quicklist->head, value, sz, 0);
         return 1;
     }
 
-    if (likely(
-            _quicklistNodeAllowInsert(quicklist->head, quicklist->fill, sz))) {
+    if (likely(_quicklistNodeAllowInsert(quicklist->head, quicklist->fill, sz))) {
         quicklist->head->entry = lpPrepend(quicklist->head->entry, value, sz);
         quicklistNodeUpdateSz(quicklist->head);
     } else {
@@ -1242,7 +1252,13 @@ int quicklistDelRange(quicklist *quicklist, const long start,
     return 1;
 }
 
-/* compare between a two entries */
+/**
+ * 比较两个条目是否相等
+ * 
+ * @param entry 条目
+ * @param p2 给定对象
+ * @param p2_len 给定对象的长度
+ */
 int quicklistCompare(quicklistEntry* entry, unsigned char *p2, const size_t p2_len) {
     if (unlikely(QL_NODE_IS_PLAIN(entry->node))) {
         return ((entry->sz == p2_len) && (memcmp(entry->value, p2, p2_len) == 0));
@@ -1655,18 +1671,26 @@ int quicklistPop(quicklist *quicklist, int where, unsigned char **data,
     return ret;
 }
 
-/* Wrapper to allow argument-based switching between HEAD/TAIL pop */
-void quicklistPush(quicklist *quicklist, void *value, const size_t sz,
-                   int where) {
-    /* The head and tail should never be compressed (we don't attempt to decompress them) */
+/**
+ * 允许基于参数在 HEAD/TAIL pop 选择的包装器
+ * 
+ * @param quicklist 快速列表
+ * @param value 待插入的值
+ * @param sz 值大小
+ * @param where 插入位置，QUICKLIST_HREAD 头部，QUICKLIST_TAIL 尾部
+ */
+void quicklistPush(quicklist *quicklist, void *value, const size_t sz, int where) {
+    // 头部或尾部永远不应该被压缩（我们也不会尝试解压它们）
     if (quicklist->head)
         assert(quicklist->head->encoding != QUICKLIST_NODE_ENCODING_LZF);
     if (quicklist->tail)
         assert(quicklist->tail->encoding != QUICKLIST_NODE_ENCODING_LZF);
 
     if (where == QUICKLIST_HEAD) {
+        // 插入头部
         quicklistPushHead(quicklist, value, sz);
     } else if (where == QUICKLIST_TAIL) {
+        // 插入尾部
         quicklistPushTail(quicklist, value, sz);
     }
 }

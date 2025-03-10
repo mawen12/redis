@@ -23,9 +23,12 @@
 #include "redisassert.h"
 #include "util.h"
 
-#define LP_HDR_SIZE 6       /* 32 bit total len + 16 bit number of elements. */
+/**
+ * listpack 编码格式
+ */
+#define LP_HDR_SIZE 6       /* 32位的从长度和16位的元素个数=48bit=6byte */
 #define LP_HDR_NUMELE_UNKNOWN UINT16_MAX
-#define LP_MAX_INT_ENCODING_LEN 9
+#define LP_MAX_INT_ENCODING_LEN
 #define LP_MAX_BACKLEN_SIZE 5
 #define LP_ENCODING_INT 0
 #define LP_ENCODING_STRING 1
@@ -449,6 +452,10 @@ static inline uint32_t lpCurrentEncodedSizeBytes(unsigned char *p) {
  * function if the current element is the EOF element at the end of the
  * listpack, however, while this function is used to implement lpNext(),
  * it does not return NULL when the EOF element is encountered. */
+
+/**
+ * 跳过当前元素，并返回下一个
+ */
 unsigned char *lpSkip(unsigned char *p) {
     unsigned long entrylen = lpCurrentEncodedSizeUnsafe(p);
     entrylen += lpEncodeBacklen(NULL,entrylen);
@@ -456,11 +463,17 @@ unsigned char *lpSkip(unsigned char *p) {
     return p;
 }
 
-/* If 'p' points to an element of the listpack, calling lpNext() will return
- * the pointer to the next element (the one on the right), or NULL if 'p'
- * already pointed to the last element of the listpack. */
+/**
+ * 如果参数p指向listpack的某个元素，调用该方法将返回下一个元素（位于当前的右边）。
+ * 如果参数p已经指向了listpack中的最后一个，则返回NULL
+ * 
+ * @param lp
+ * @param p 指向lp中的元素
+ * @retval 
+ */
 unsigned char *lpNext(unsigned char *lp, unsigned char *p) {
     assert(p);
+    // 
     p = lpSkip(p);
     if (p[0] == LP_EOF) return NULL;
     lpAssertValidEntry(lp, lpBytes(lp), p);
@@ -481,11 +494,15 @@ unsigned char *lpPrev(unsigned char *lp, unsigned char *p) {
     return p;
 }
 
-/* Return a pointer to the first element of the listpack, or NULL if the
- * listpack has no elements. */
+/**
+ * 返回指向listpack中第一个元素的指针，如果listpack为空，则返回NULL。
+ */
 unsigned char *lpFirst(unsigned char *lp) {
+    // 跳过头
     unsigned char *p = lp + LP_HDR_SIZE; /* Skip the header. */
+    // 如果首个元素为空，则代表listpack为空
     if (p[0] == LP_EOF) return NULL;
+    // 校验合法性
     lpAssertValidEntry(lp, lpBytes(lp), p);
     return p;
 }
@@ -1405,7 +1422,9 @@ unsigned char *lpDup(unsigned char *lp) {
     return newlp;
 }
 
-/* Return the total number of bytes the listpack is composed of. */
+/**
+ * 返回组成listpack的总字节数
+ */
 size_t lpBytes(unsigned char *lp) {
     return lpGetTotalBytes(lp);
 }
@@ -1423,48 +1442,51 @@ size_t lpEstimateBytesRepeatedInteger(long long lval, unsigned long rep) {
     return LP_HDR_SIZE + lpEntrySizeInteger(lval) * rep + 1;
 }
 
-/* Seek the specified element and returns the pointer to the seeked element.
- * Positive indexes specify the zero-based element to seek from the head to
- * the tail, negative indexes specify elements starting from the tail, where
- * -1 means the last element, -2 the penultimate and so forth. If the index
- * is out of range, NULL is returned. */
+/**
+ * 检索指定元素，并返回该元素的指针。
+ * 这是基于LISTAPCK编码的核心查找实现。
+ * 
+ * @param lp LISTPACK 编码的列表
+ * @param index 开始查找的索引，正数意味着从头到尾查找从0开始的元素，
+ * 负数意味着从尾到头查找。如果指定的索引越界，将返回NULL。
+ */
 unsigned char *lpSeek(unsigned char *lp, long index) {
-    int forward = 1; /* Seek forward by default. */
-
-    /* We want to seek from left to right or the other way around
-     * depending on the listpack length and the element position.
-     * However if the listpack length cannot be obtained in constant time,
-     * we always seek from left to right. */
+    int forward = 1; /* 默认的查找方向 */
+    
+    // 我们想要从左到右查找或由listpack长度和元素位置决定查找。然而，如果listpack长度在常量时间内没办法返回，则总是从左到右查找。
+    // 返回元素数量
     uint32_t numele = lpGetNumElements(lp);
     if (numele != LP_HDR_NUMELE_UNKNOWN) {
-        if (index < 0) index = (long)numele+index;
-        if (index < 0) return NULL; /* Index still < 0 means out of range. */
-        if (index >= (long)numele) return NULL; /* Out of range the other side. */
-        /* We want to scan right-to-left if the element we are looking for
-         * is past the half of the listpack. */
+        if (index < 0) index = (long)numele+index; /* 修正index */
+        if (index < 0) return NULL; /* 修正过后的index仍然小于0意味着其已经越界 */
+        if (index >= (long)numele) return NULL; /* 索引越界 */
+        
+        // 如果要查找的元素超过了 listpack 的一半，我们希望从右到左扫描
         if (index > (long)numele/2) {
             forward = 0;
-            /* Right to left scanning always expects a negative index. Convert
-             * our index to negative form. */
+            /* 从右到左扫描总是期望负数索引 */
             index -= numele;
         }
     } else {
-        /* If the listpack length is unspecified, for negative indexes we
-         * want to always scan right-to-left. */
+        // 对于返回元素数量错误，即无法在常量时间内返回listpack长度，则默认从左到右
         if (index < 0) forward = 0;
     }
 
-    /* Forward and backward scanning is trivially based on lpNext()/lpPrev(). */
-    if (forward) {
+    
+    if (forward) {// 正向扫描基于 lpFirst/lpNext
+        // 获取第一个元素
         unsigned char *ele = lpFirst(lp);
-        while (index > 0 && ele) {
+        while (index > 0 && ele) {// 当扫描到达次数上限，或者元素为空时，跳出循环
+            // 获取下一个元素
             ele = lpNext(lp,ele);
             index--;
         }
         return ele;
-    } else {
+    } else {// 反向扫描基于 lpLast/lpPrev
+        // 获取最后一个元素
         unsigned char *ele = lpLast(lp);
-        while (index < -1 && ele) {
+        while (index < -1 && ele) {// 当扫描到达次数上限，或者元素为空时，跳出循环
+            // 获取前一个元素
             ele = lpPrev(lp,ele);
             index++;
         }
@@ -1479,9 +1501,15 @@ unsigned char *lpValidateFirst(unsigned char *lp) {
     return p;
 }
 
-/* Validate the integrity of a single listpack entry and move to the next one.
- * The input argument 'pp' is a reference to the current record and is advanced on exit.
- * Returns 1 if valid, 0 if invalid. */
+/**
+ * 验证单个listpack条目的完整性，并移动到下一个
+ * 
+ * @param lp lp
+ * @param pp 当当前记录的引用，并在退出前前进
+ * @param 1pbytes lp的总字节数
+ * @retval 0 非法
+ * @retval 1 合法
+ */
 int lpValidateNext(unsigned char *lp, unsigned char **pp, size_t lpbytes) {
 #define OUT_OF_RANGE(p) ( \
         (p) < lp + LP_HDR_SIZE || \
@@ -1530,7 +1558,9 @@ int lpValidateNext(unsigned char *lp, unsigned char **pp, size_t lpbytes) {
 #undef OUT_OF_RANGE
 }
 
-/* Validate that the entry doesn't reach outside the listpack allocation. */
+/**
+ * 校验条目并未超出listpack的分配
+ */
 static inline void lpAssertValidEntry(unsigned char* lp, size_t lpbytes, unsigned char *p) {
     assert(lpValidateNext(lp, &p, lpbytes));
 }
@@ -1586,13 +1616,22 @@ int lpValidateIntegrity(unsigned char *lp, size_t size, int deep,
     return 1;
 }
 
-/* Compare entry pointer to by 'p' with string 's' of length 'slen'.
- * Return 1 if equal. */
+/**
+ * 将指向p的条目指针与长度slen的字符串s相比较。
+ * 
+ * @param p 条目
+ * @param s 字符串
+ * @param slen 字符串s的长度
+ * @retval 0 不相等
+ * @retval 1 相等
+ */
 unsigned int lpCompare(unsigned char *p, unsigned char *s, uint32_t slen) {
     unsigned char *value;
     int64_t sz;
+    // 空元素场景
     if (p[0] == LP_EOF) return 0;
 
+    // 获取p的值
     value = lpGet(p, &sz, NULL);
     if (value) {
         return (slen == sz) && memcmp(value,s,slen) == 0;
