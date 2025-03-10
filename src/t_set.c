@@ -416,31 +416,42 @@ sds setTypeNextObject(setTypeIterator *si) {
     return sdsfromlonglong(intele);
 }
 
-/* Return random element from a non empty set.
- * The returned element can be an int64_t value if the set is encoded
- * as an "intset" blob of integers, or an string.
- *
- * The caller provides three pointers to be populated with the right
- * object. The return value of the function is the object->encoding
- * field of the object and can be used by the caller to check if the
- * int64_t pointer or the str and len pointers were populated, as for
- * setTypeNext. If OBJ_ENCODING_HT is returned, str is pointed to a
- * string which is actually an sds string and it can be used as such.
- *
- * Note that both the str, len and llele pointers should be passed and cannot
- * be NULL. If str is set to NULL, the value is an integer stored in llele. */
+/**
+ * 从非空的Set集合中返回随机元素。
+ * 如果Set集合的编码为整数的intset blob，则返回的元素可以是 int64_t。
+ * 
+ * 调用者提供三个指针用于填充正确的对象。函数的返回值是object->encoding字段，
+ * 调用者可以使用它来检查int64_t指针或str和len指针是否已填充，就像 setTypeText 一样。
+ * 如果返回 OBJ_ENCODING_INT，则str指向的字符串实际上是sds字符串，可以按原样使用。
+ * 
+ * 注意：str, len, llele 指针应该被传递，不能为NULL。如果str设置为NULL，则该值
+ * 是存储在llele中的整数。
+ * 
+ * @param setobj Set集合
+ * @param str 被 OBJ_ENCODING_HT 和 OBJ_ENCODING_LISTPACK 所使用，用来保存值
+ * @param len 配合参数str使用，用来保存str的长度
+ * @param llele 被 OBJ_ENCODING_INTSET 所使用，用来保存值
+ * @retval setobj的编码
+ */
 int setTypeRandomElement(robj *setobj, char **str, size_t *len, int64_t *llele) {
-    if (setobj->encoding == OBJ_ENCODING_HT) {
+    if (setobj->encoding == OBJ_ENCODING_HT) {// 处理 OBJ_ENCODING_HT 编码
+        // 从Set集合中获取随机dict
         dictEntry *de = dictGetFairRandomKey(setobj->ptr);
+        // 获取键
         *str = dictGetKey(de);
+        // 计算sds字符串长度
         *len = sdslen(*str);
-        *llele = -123456789; /* Not needed. Defensive. */
-    } else if (setobj->encoding == OBJ_ENCODING_INTSET) {
+        *llele = -123456789; /* 不需要使用，防守编程 */
+    } else if (setobj->encoding == OBJ_ENCODING_INTSET) {// 处理 OBJ_ENCODING_INTSET 编码
+        // 从Set集合中获取所及int
         *llele = intsetRandom(setobj->ptr);
-        *str = NULL; /* Not needed. Defensive. */
-    } else if (setobj->encoding == OBJ_ENCODING_LISTPACK) {
+        *str = NULL; /* 不需要使用，防守编程 */
+    } else if (setobj->encoding == OBJ_ENCODING_LISTPACK) {// 处理 OBJ_ENCODING_LISTPACK 编码
+        // 获取char
         unsigned char *lp = setobj->ptr;
+        // 计算随机值
         int r = rand() % lpLength(lp);
+        // 获取指定的char
         unsigned char *p = lpSeek(lp, r);
         unsigned int l;
         *str = (char *)lpGetValue(p, &l, (long long *)llele);
@@ -448,14 +459,20 @@ int setTypeRandomElement(robj *setobj, char **str, size_t *len, int64_t *llele) 
     } else {
         serverPanic("Unknown set encoding");
     }
+    // 返回Set集合的编码
     return setobj->encoding;
 }
 
-/* Pops a random element and returns it as an object. */
+/**
+ * 从Set集合中弹出一个随机元素，并以Redis对象返回
+ * 
+ * @param set Set集合
+ * @retval 随机的元素
+ */
 robj *setTypePopRandom(robj *set) {
     robj *obj;
-    if (set->encoding == OBJ_ENCODING_LISTPACK) {
-        /* Find random and delete it without re-seeking the listpack. */
+    if (set->encoding == OBJ_ENCODING_LISTPACK) {// 处理LISTPACK编码
+        // 查找随机元素并删除，无需重新寻找 listpack
         unsigned int i = 0;
         unsigned char *p = lpNextRandom(set->ptr, lpFirst(set->ptr), &i, 1, 1);
         unsigned int len = 0; /* initialize to silence warning */
@@ -466,7 +483,7 @@ robj *setTypePopRandom(robj *set) {
         else
             obj = createStringObjectFromLongLong(llele);
         set->ptr = lpDelete(set->ptr, p, NULL);
-    } else {
+    } else {// 处理 SET 编码
         char *str;
         size_t len = 0;
         int64_t llele = 0;
@@ -1046,32 +1063,33 @@ void spopWithCountCommand(client *c) {
 void spopCommand(client *c) {
     robj *set, *ele;
 
-    if (c->argc == 3) {// 参数长度为3，则执行
+    if (c->argc == 3) {// 参数长度为3，则执行带有count参数的命令
         spopWithCountCommand(c);
         return;
-    } else if (c->argc > 3) {
+    } else if (c->argc > 3) {// 超过3，则报错
         addReplyErrorObject(c,shared.syntaxerr);
         return;
     }
 
-    /* Make sure a key with the name inputted exists, and that it's type is
-     * indeed a set */
-    if ((set = lookupKeyWriteOrReply(c,c->argv[1],shared.null[c->resp]))
-         == NULL || checkType(c,set,OBJ_SET)) return;
+    // 确保key存在，且类型为SET
+    if ((set = lookupKeyWriteOrReply(c,c->argv[1],shared.null[c->resp])) == NULL || checkType(c,set,OBJ_SET)) 
+        return;
 
-    /* Pop a random element from the set */
+    // 从Set集合中弹出一个随机元素
     ele = setTypePopRandom(set);
 
+    // 发送事件通知
     notifyKeyspaceEvent(NOTIFY_SET,"spop",c->argv[1],c->db->id);
 
-    /* Replicate/AOF this command as an SREM operation */
+    // 作为 SREM 命令传播到副本和AOF
     rewriteClientCommandVector(c,3,shared.srem,c->argv[1],ele);
 
-    /* Add the element to the reply */
+    // 将元素添加到响应
     addReplyBulk(c, ele);
+    // 减少引用
     decrRefCount(ele);
 
-    /* Delete the set if it's empty */
+    // 如果Set集合已经为空，则删除
     if (setTypeSize(set) == 0) {
         dbDelete(c->db,c->argv[1]);
         notifyKeyspaceEvent(NOTIFY_GENERIC,"del",c->argv[1],c->db->id);
@@ -1299,29 +1317,37 @@ void srandmemberWithCountCommand(client *c) {
     }
 }
 
-/* SRANDMEMBER <key> [<count>] */
+/**
+ * SRANDMEMBER命令入口
+ * 
+ * 命令格式：SRANDMEMBER key [count]
+ * 
+ * @param c 携带命令的客户端
+ */
 void srandmemberCommand(client *c) {
     robj *set;
     char *str;
     size_t len;
     int64_t llele;
 
-    if (c->argc == 3) {
+    if (c->argc == 3) {// 处理带有count参数
         srandmemberWithCountCommand(c);
         return;
-    } else if (c->argc > 3) {
+    } else if (c->argc > 3) {// 参数数量错误
         addReplyErrorObject(c,shared.syntaxerr);
         return;
     }
 
-    /* Handle variant without <count> argument. Reply with simple bulk string */
-    if ((set = lookupKeyReadOrReply(c,c->argv[1],shared.null[c->resp]))
-        == NULL || checkType(c,set,OBJ_SET)) return;
+    // 处理不带count参数。以简单bulk string应答
+    // 如果key不存在，或编码错误，则直接返回
+    if ((set = lookupKeyReadOrReply(c,c->argv[1],shared.null[c->resp])) == NULL || checkType(c,set,OBJ_SET)) 
+        return;
 
+    // 获取随机的元素
     setTypeRandomElement(set, &str, &len, &llele);
-    if (str == NULL) {
+    if (str == NULL) {// Set编码为OBJ_ENCODING_INTSET，因此str为空，值被存储到llele
         addReplyBulkLongLong(c,llele);
-    } else {
+    } else {// Set编码为OBJ_ENCODING_HT/OBJ_ENCODING_LISTPACK，值存储到str
         addReplyBulkCBuffer(c, str, len);
     }
 }
@@ -1352,9 +1378,20 @@ int qsortCompareSetsByRevCardinality(const void *s1, const void *s2) {
  * 'limit' work for SINTERCARD, stop searching after reaching the limit.
  * Passing a 0 means unlimited.
  */
+/**
+ * 处理 SINTER/SMEMEBERS/SINTERSTORE/SINTERCARD 命令的通用入口
+ * 
+ * @param c 携带命令的客户端
+ * @param setkeys 第一个键
+ * @param setnum 参与计算键的总数
+ * @param dstkey 仅被 SINTERSTORE 所使用，用于保存计算结果的键
+ * @param cardinality_only 仅被 SINTERCARD 所使用，返回具有最小处理和内存开销的基数
+ * @param limit 仅被 SINTERCARD 所使用，在达到上限后停止搜索，传递0代表不限制。
+ */
 void sinterGenericCommand(client *c, robj **setkeys,
                           unsigned long setnum, robj *dstkey,
                           int cardinality_only, unsigned long limit) {
+    // 根据数量分配集合
     robj **sets = zmalloc(sizeof(robj*)*setnum);
     setTypeIterator *si;
     robj *dstset = NULL;
@@ -1365,27 +1402,27 @@ void sinterGenericCommand(client *c, robj **setkeys,
     unsigned long j, cardinality = 0;
     int encoding, empty = 0;
 
+    // 从数据据中查找key，并对sets初始化，以保存值
     for (j = 0; j < setnum; j++) {
+        // 获取key的值
         robj *setobj = lookupKeyRead(c->db, setkeys[j]);
-        if (!setobj) {
-            /* A NULL is considered an empty set */
+        if (!setobj) {// 将空集合视为NULL
             empty += 1;
             sets[j] = NULL;
             continue;
         }
-        if (checkType(c,setobj,OBJ_SET)) {
-            zfree(sets);
+        if (checkType(c,setobj,OBJ_SET)) {// 检查类型为SET
+            zfree(sets);// 分配SET空间
             return;
         }
         sets[j] = setobj;
     }
 
-    /* Set intersection with an empty set always results in an empty set.
-     * Return ASAP if there is an empty set. */
-    if (empty > 0) {
+    // 集合与空集的交集始终为空集，如果存在空集，则返回 ASAP
+    if (empty > 0) {// 表示存在空集
         zfree(sets);
-        if (dstkey) {
-            if (dbDelete(c->db,dstkey)) {
+        if (dstkey) {// 处理需要保存的场景，因为有可能已经存在该key，此时需要删除原先的key
+            if (dbDelete(c->db,dstkey)) {// 删除原先key
                 signalModifiedKey(c,c->db,dstkey);
                 notifyKeyspaceEvent(NOTIFY_GENERIC,"del",dstkey,c->db->id);
                 server.dirty++;
@@ -1399,8 +1436,7 @@ void sinterGenericCommand(client *c, robj **setkeys,
         return;
     }
 
-    /* Sort sets from the smallest to largest, this will improve our
-     * algorithm's performance */
+    // 从小到大对Set集合进行排序，这将改善我们的算法性能
     qsort(sets,setnum,sizeof(robj*),qsortCompareSetsByCardinality);
 
     /* The first thing we should output is the total number of elements...
@@ -1515,20 +1551,35 @@ void sinterGenericCommand(client *c, robj **setkeys,
     zfree(sets);
 }
 
-/* SINTER key [key ...] */
+/**
+ * SINERT命令入口
+ * 
+ * 命令格式：SINTER key [key ...]
+ * 
+ * 返回多个key的Set产生交集的元素集合
+ * 
+ * @param c 携带命令的客户端
+ */
 void sinterCommand(client *c) {
     sinterGenericCommand(c, c->argv+1,  c->argc-1, NULL, 0, 0);
 }
 
-/* SINTERCARD numkeys key [key ...] [LIMIT limit] */
+/**
+ * SINTERCARD命令入口
+ * 
+ * 命令格式：SINTERCARD numkeys key [key ...] [LIMIT limit]
+ * 
+ * @param c 携带命令的客户端
+ */
 void sinterCardCommand(client *c) {
     long j;
-    long numkeys = 0; /* Number of keys. */
-    long limit = 0;   /* 0 means not limit. */
+    long numkeys = 0; /* key的总数 */
+    long limit = 0;   /* 0 意味着没有限制 */
 
-    if (getRangeLongFromObjectOrReply(c, c->argv[1], 1, LONG_MAX,
-                                      &numkeys, "numkeys should be greater than 0") != C_OK)
+    // 检查 numkeys 参数应该>0
+    if (getRangeLongFromObjectOrReply(c, c->argv[1], 1, LONG_MAX, &numkeys, "numkeys should be greater than 0") != C_OK)
         return;
+    // 检查 numkeys 应该与 argc - 2 相等
     if (numkeys > (c->argc - 2)) {
         addReplyError(c, "Number of keys can't be greater than number of args");
         return;
@@ -1552,7 +1603,13 @@ void sinterCardCommand(client *c) {
     sinterGenericCommand(c, c->argv+2, numkeys, NULL, 1, limit);
 }
 
-/* SINTERSTORE destination key [key ...] */
+/**
+ * SINTERSTORE命令入口
+ * 
+ * 命令格式：SINTERSTORE destination key [key ...]
+ * 
+ * @param c 携带命令的客户端 
+ */
 void sinterstoreCommand(client *c) {
     sinterGenericCommand(c, c->argv+2, c->argc-2, c->argv[1], 0, 0);
 }
@@ -1727,32 +1784,69 @@ void sunionDiffGenericCommand(client *c, robj **setkeys, int setnum,
     zfree(sets);
 }
 
-/* SUNION key [key ...] */
+/**
+ * SUNION命令入口
+ * 
+ * 命令格式：SUNION key [key ...]
+ * 
+ * @param c 携带命令的客户端
+ */
 void sunionCommand(client *c) {
     sunionDiffGenericCommand(c,c->argv+1,c->argc-1,NULL,SET_OP_UNION);
 }
 
-/* SUNIONSTORE destination key [key ...] */
+/**
+ * SUNIONSTORE命令入口
+ * 
+ * 命令格式：SUNIONSTORE destionation key [key ...]
+ * 
+ * @param c 携带命令的客户端
+ */
 void sunionstoreCommand(client *c) {
     sunionDiffGenericCommand(c,c->argv+2,c->argc-2,c->argv[1],SET_OP_UNION);
 }
 
-/* SDIFF key [key ...] */
+/**
+ * SDIFF命令入口
+ * 
+ * 命令格式：SDIFF key [key ...]
+ * 
+ * 比较第一个key和其他key对应的集合的区别
+ * 
+ * @param c 携带命令的客户端
+ */
 void sdiffCommand(client *c) {
     sunionDiffGenericCommand(c,c->argv+1,c->argc-1,NULL,SET_OP_DIFF);
 }
 
-/* SDIFFSTORE destination key [key ...] */
+/**
+ * SDIFFSTORE命令入口
+ * 
+ * 命令格式：SDIFFSTORE destionation key [key ...]
+ * 
+ * 比较第一个key和其他key对应的集合的区别，并保存
+ * 
+ * @param c 携带命令的客户端
+ */
 void sdiffstoreCommand(client *c) {
     sunionDiffGenericCommand(c,c->argv+2,c->argc-2,c->argv[1],SET_OP_DIFF);
 }
 
+/**
+ * SSCAN命令入口
+ * 
+ * 命令格式：SSCAN key cursor [MATCH pattern] [COUNT count]
+ * 
+ * @param c 携带命令的客户端
+ */
 void sscanCommand(client *c) {
     robj *set;
     unsigned long long cursor;
-
-    if (parseScanCursorOrReply(c,c->argv[2],&cursor) == C_ERR) return;
-    if ((set = lookupKeyReadOrReply(c,c->argv[1],shared.emptyscan)) == NULL ||
-        checkType(c,set,OBJ_SET)) return;
+    
+    if (parseScanCursorOrReply(c,c->argv[2],&cursor) == C_ERR) 
+        return;
+    // 值为空，且类型必须为SET
+    if ((set = lookupKeyReadOrReply(c,c->argv[1],shared.emptyscan)) == NULL || checkType(c,set,OBJ_SET)) 
+        return;
     scanGenericCommand(c,set,cursor);
 }

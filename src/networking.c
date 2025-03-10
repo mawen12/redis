@@ -3748,6 +3748,9 @@ void redactClientCommandArgument(client *c, int argc) {
 /**
  * 重写客户端的命令向量。所有新创建对象的引用总数递增。老的命令向量被释放，
  * 老对象的引用总数被递减。
+ * 
+ * @param c 客户端
+ * @param argc
  */
 void rewriteClientCommandVector(client *c, int argc, ...) {
     va_list ap;
