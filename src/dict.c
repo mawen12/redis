@@ -184,6 +184,8 @@ static void _dictReset(dict *d, int htidx)
 
 /**
  * 创建一个新的hash table
+ * 
+ * @param type
  */
 dict *dictCreate(dictType *type)
 {

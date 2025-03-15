@@ -26,9 +26,9 @@
 /**
  * listpack 编码格式
  */
-#define LP_HDR_SIZE 6       /* 32位的从长度和16位的元素个数=48bit=6byte */
+#define LP_HDR_SIZE 6       /* 32位的总长度和16位的元素个数=48bit=6byte */
 #define LP_HDR_NUMELE_UNKNOWN UINT16_MAX
-#define LP_MAX_INT_ENCODING_LEN
+#define LP_MAX_INT_ENCODING_LEN 9
 #define LP_MAX_BACKLEN_SIZE 5
 #define LP_ENCODING_INT 0
 #define LP_ENCODING_STRING 1
@@ -215,11 +215,15 @@ int lpStringToInt64(const char *s, unsigned long slen, int64_t *value) {
     return 1;
 }
 
-/* Create a new, empty listpack.
- * On success the new listpack is returned, otherwise an error is returned.
- * Pre-allocate at least `capacity` bytes of memory,
- * over-allocated memory can be shrunk by `lpShrinkToFit`.
- * */
+/**
+ * 创建一个新的、空的 listpack 对象。
+ * 预分配至少'capacity'的内存字节数。
+ * 过度分配的内存可以通过'lpShrinkToFit'缩小。
+ * 
+ * @param capacity 预分配的容量
+ * 
+ * @retval 如果成功，则返回新的 listpack 对象，否则返回错误。
+ */
 unsigned char *lpNew(size_t capacity) {
     unsigned char *lp = lp_malloc(capacity > LP_HDR_SIZE+1 ? capacity : LP_HDR_SIZE+1);
     if (lp == NULL) return NULL;
@@ -244,14 +248,20 @@ unsigned char* lpShrinkToFit(unsigned char *lp) {
     }
 }
 
-/* Stores the integer encoded representation of 'v' in the 'intenc' buffer. */
+/**
+ * 在intenc缓冲区中存储代表整数编码的v
+ * 
+ * @param v
+ * @param intenc
+ * @param enclen
+ */
 static inline void lpEncodeIntegerGetType(int64_t v, unsigned char *intenc, uint64_t *enclen) {
     if (v >= 0 && v <= 127) {
-        /* Single byte 0-127 integer. */
+        // 单字节整数：[0, 127]
         if (intenc != NULL) intenc[0] = v;
         if (enclen != NULL) *enclen = 1;
     } else if (v >= -4096 && v <= 4095) {
-        /* 13 bit integer. */
+        // 13位整数：[-4096, 4095]
         if (v < 0) v = ((int64_t)1<<13)+v;
         if (intenc != NULL) {
             intenc[0] = (v>>8)|LP_ENCODING_13BIT_INT;
@@ -259,7 +269,7 @@ static inline void lpEncodeIntegerGetType(int64_t v, unsigned char *intenc, uint
         }
         if (enclen != NULL) *enclen = 2;
     } else if (v >= -32768 && v <= 32767) {
-        /* 16 bit integer. */
+        // 16位整数：[-32768, 32767]
         if (v < 0) v = ((int64_t)1<<16)+v;
         if (intenc != NULL) {
             intenc[0] = LP_ENCODING_16BIT_INT;
@@ -268,7 +278,7 @@ static inline void lpEncodeIntegerGetType(int64_t v, unsigned char *intenc, uint
         }
         if (enclen != NULL) *enclen = 3;
     } else if (v >= -8388608 && v <= 8388607) {
-        /* 24 bit integer. */
+        // 24位整数：[-8388608, 8388607]
         if (v < 0) v = ((int64_t)1<<24)+v;
         if (intenc != NULL) {
             intenc[0] = LP_ENCODING_24BIT_INT;
@@ -278,7 +288,7 @@ static inline void lpEncodeIntegerGetType(int64_t v, unsigned char *intenc, uint
         }
         if (enclen != NULL) *enclen = 4;
     } else if (v >= -2147483648 && v <= 2147483647) {
-        /* 32 bit integer. */
+        // 32位整数：[-2147483648, 2147483647]
         if (v < 0) v = ((int64_t)1<<32)+v;
         if (intenc != NULL) {
             intenc[0] = LP_ENCODING_32BIT_INT;
@@ -289,7 +299,7 @@ static inline void lpEncodeIntegerGetType(int64_t v, unsigned char *intenc, uint
         }
         if (enclen != NULL) *enclen = 5;
     } else {
-        /* 64 bit integer. */
+        // 64位整数
         uint64_t uv = v;
         if (intenc != NULL) {
             intenc[0] = LP_ENCODING_64BIT_INT;
@@ -330,11 +340,19 @@ static inline int lpEncodeGetType(unsigned char *ele, uint32_t size, unsigned ch
     }
 }
 
-/* Store a reverse-encoded variable length field, representing the length
- * of the previous element of size 'l', in the target buffer 'buf'.
- * The function returns the number of bytes used to encode it, from
- * 1 to 5. If 'buf' is NULL the function just returns the number of bytes
- * needed in order to encode the backlen. */
+/**
+ * 在目标缓冲区'buf'中存储一个反向编码的可变长度字段，表示大小为l的前一个元素的长度。
+ * 该函数返回用于编码的字节数，从1到5。如果buf为空，该函数仅返回编码backlen所需的字节数。
+ * 
+ * - [0, 127] -> buf[0] = 1
+ * - (127, 16383] -> buf[0] = 1>>7; buf[1] = (1&127)|128
+ * - (16383, 2097151] -> buf[0] = 1>>14; buf[1] = ((1>>7)&127)|128; buf[2] = (1&127)|128
+ * - (2097151, 268435455] -> buf[0] = 1>>21; buf[1] = ((1>>14)&127)|128; buf[2] = ((1>>7)&127)|128;  buf[3] = (1&127)|128
+ * - (268435455, 无限] -> buf[0] -> 1>>28; buf[1] = ((1>>21)&127)|128; buf[2] = ((1>>14)&127)|128; buf[3] = ((1>>7)&127)|128; buf[4] = (1&127)|128
+ * 
+ * @param buf 根据元素长度，要进行的缓冲区的编码处理
+ * @param l 元素长度
+ */
 static inline unsigned long lpEncodeBacklen(unsigned char *buf, uint64_t l) {
     if (l <= 127) {
         if (buf) buf[0] = l;
@@ -409,55 +427,85 @@ static inline void lpEncodeString(unsigned char *buf, unsigned char *s, uint32_t
     }
 }
 
-/* Return the encoded length of the listpack element pointed by 'p'.
- * This includes the encoding byte, length bytes, and the element data itself.
- * If the element encoding is wrong then 0 is returned.
- * Note that this method may access additional bytes (in case of 12 and 32 bit
- * str), so should only be called when we know 'p' was already validated by
- * lpCurrentEncodedSizeBytes or ASSERT_INTEGRITY_LEN (possibly since 'p' is
- * a return value of another function that validated its return. */
+/**
+ * 返回由p指向的listpack元素的编码长度。
+ * 该值包含编码字节、长度字节数和元素数据本身。
+ * 如果该元素的编码错误，将返回0。
+ * 
+ * 请注意：该方法可能访问额外的字节数（对于12位和13位str），因此只有当我们知道p
+ * 通过 lpCurrentEncodedSizeBytes 或 ASSERT_INTEGRITY_LEN 验证时才应调用（
+ * 可能是因为p是另一个验证其返回值的函数的的返回值） 
+ * 
+ * @param p 指向字段对应值的字符串
+ * 
+ * @retval 0 元素编码错误
+ */
 static inline uint32_t lpCurrentEncodedSizeUnsafe(unsigned char *p) {
+    // 如果是7bit编码，则返回1
     if (LP_ENCODING_IS_7BIT_UINT(p[0])) return 1;
+    // 如果是6bit字符串编码，则返回1+p[0]&0x3F
     if (LP_ENCODING_IS_6BIT_STR(p[0])) return 1+LP_ENCODING_6BIT_STR_LEN(p);
+    // 如果是13bit编码，则返回2
     if (LP_ENCODING_IS_13BIT_INT(p[0])) return 2;
+    // 如果是16bit编码，则返回3
     if (LP_ENCODING_IS_16BIT_INT(p[0])) return 3;
+    // 如果是24bit编码，则返回4
     if (LP_ENCODING_IS_24BIT_INT(p[0])) return 4;
+    // 如果是32bit编码，则返回5
     if (LP_ENCODING_IS_32BIT_INT(p[0])) return 5;
+    // 如果是64bit编码，则返回9
     if (LP_ENCODING_IS_64BIT_INT(p[0])) return 9;
+    // 如果是12bit字符串编码，则返回2+((((p)[0] & 0xF) << 8) | (p)[1])
     if (LP_ENCODING_IS_12BIT_STR(p[0])) return 2+LP_ENCODING_12BIT_STR_LEN(p);
+    // 如果是32bit字符串编码，则返回5+(((uint32_t)(p)[1]<<0) | ((uint32_t)(p)[2]<<8) | ((uint32_t)(p)[3]<<16) | ((uint32_t)(p)[4]<<24))
     if (LP_ENCODING_IS_32BIT_STR(p[0])) return 5+LP_ENCODING_32BIT_STR_LEN(p);
+    // 当到达末尾，则返回1
     if (p[0] == LP_EOF) return 1;
+    // 返回0
     return 0;
 }
-
-/* Return bytes needed to encode the length of the listpack element pointed by 'p'.
- * This includes just the encoding byte, and the bytes needed to encode the length
- * of the element (excluding the element data itself)
- * If the element encoding is wrong then 0 is returned. */
-static inline uint32_t lpCurrentEncodedSizeBytes(unsigned char *p) {
-    if (LP_ENCODING_IS_7BIT_UINT(p[0])) return 1;
-    if (LP_ENCODING_IS_6BIT_STR(p[0])) return 1;
-    if (LP_ENCODING_IS_13BIT_INT(p[0])) return 1;
-    if (LP_ENCODING_IS_16BIT_INT(p[0])) return 1;
-    if (LP_ENCODING_IS_24BIT_INT(p[0])) return 1;
-    if (LP_ENCODING_IS_32BIT_INT(p[0])) return 1;
-    if (LP_ENCODING_IS_64BIT_INT(p[0])) return 1;
-    if (LP_ENCODING_IS_12BIT_STR(p[0])) return 2;
-    if (LP_ENCODING_IS_32BIT_STR(p[0])) return 5;
-    if (p[0] == LP_EOF) return 1;
-    return 0;
-}
-
-/* Skip the current entry returning the next. It is invalid to call this
- * function if the current element is the EOF element at the end of the
- * listpack, however, while this function is used to implement lpNext(),
- * it does not return NULL when the EOF element is encountered. */
 
 /**
- * 跳过当前元素，并返回下一个
+ * 返回编码p指向的listpack元素的长度所需的字节。
+ * 该值包含编码字节、以及编码元素长度所需的字节（不包括元素数据本身）。
+ * 如果该元素的编码错误，将返回0。
+ */
+static inline uint32_t lpCurrentEncodedSizeBytes(unsigned char *p) {
+    // 如果是7bit编码，则返回1
+    if (LP_ENCODING_IS_7BIT_UINT(p[0])) return 1;
+    // 如果是6bit字符串编码，则返回1
+    if (LP_ENCODING_IS_6BIT_STR(p[0])) return 1;
+    // 如果是13bit编码，则返回1
+    if (LP_ENCODING_IS_13BIT_INT(p[0])) return 1;
+    // 如果是16bit编码，则返回1
+    if (LP_ENCODING_IS_16BIT_INT(p[0])) return 1;
+    // 如果是24bit编码，则返回1
+    if (LP_ENCODING_IS_24BIT_INT(p[0])) return 1;
+    // 如果是32bit编码，则返回1
+    if (LP_ENCODING_IS_32BIT_INT(p[0])) return 1;
+    // 如果是64bit编码，则返回1
+    if (LP_ENCODING_IS_64BIT_INT(p[0])) return 1;
+    // 如果是12bit字符串编码，则返回2
+    if (LP_ENCODING_IS_12BIT_STR(p[0])) return 2;
+    // 如果是32bit字符串编码，则返回5
+    if (LP_ENCODING_IS_32BIT_STR(p[0])) return 5;
+    // 当到达末尾，则返回1
+    if (p[0] == LP_EOF) return 1;
+    // 返回0
+    return 0;
+}
+
+/**
+ * 跳过当前元素，并返回下一个。如果当前元素是EOF，位于listpack的末尾，
+ * 那么调用该函数则是非法的，然后，当该函数被用作实现lpNext()时，
+ * 当遇到EOF元素时，它不会返回NULL。 
+ * 
+ * @param p 指向字段对应值的字符串
  */
 unsigned char *lpSkip(unsigned char *p) {
+    // 获取编码长度
     unsigned long entrylen = lpCurrentEncodedSizeUnsafe(p);
+    // 
     entrylen += lpEncodeBacklen(NULL,entrylen);
     p += entrylen;
     return p;
@@ -467,8 +515,8 @@ unsigned char *lpSkip(unsigned char *p) {
  * 如果参数p指向listpack的某个元素，调用该方法将返回下一个元素（位于当前的右边）。
  * 如果参数p已经指向了listpack中的最后一个，则返回NULL
  * 
- * @param lp
- * @param p 指向lp中的元素
+ * @param lp 指向Redis值对象的字符串
+ * @param p 指向字段对应值的字符串
  * @retval 
  */
 unsigned char *lpNext(unsigned char *lp, unsigned char *p) {
@@ -805,6 +853,18 @@ static inline int lpFindCmp(const unsigned char *lp, unsigned char *p,
 
 /* Find pointer to the entry equal to the specified entry. Skip 'skip' entries
  * between every comparison. Returns NULL when the field could not be found. */
+
+/**
+ * 查找等于特定条目的指针。跳过每次比较之间的 skip 条目。
+ * 如果字段没有被找到，返回NULL。
+ * 
+ * @param lp
+ * @param p
+ * @param s
+ * @param slen
+ * @param skip
+ * @retval 
+ */
 unsigned char *lpFind(unsigned char *lp, unsigned char *p, unsigned char *s,
                       uint32_t slen, unsigned int skip)
 {
@@ -1133,11 +1193,13 @@ unsigned char *lpInsertString(unsigned char *lp, unsigned char *s, uint32_t slen
     return lpInsert(lp, s, NULL, slen, p, where, newp);
 }
 
-/* This is just a wrapper for lpInsert() to directly use a 64 bit integer
- * instead of a string. */
+/**
+ * 这是用于lpInsert()的包装器，以便直接使用64位数字而非字符串。
+ */
 unsigned char *lpInsertInteger(unsigned char *lp, long long lval, unsigned char *p, int where, unsigned char **newp) {
     uint64_t enclen; /* The length of the encoded element. */
     unsigned char intenc[LP_MAX_INT_ENCODING_LEN];
+
 
     lpEncodeIntegerGetType(lval, intenc, &enclen);
     return lpInsert(lp, NULL, intenc, enclen, p, where, newp);

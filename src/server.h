@@ -906,23 +906,51 @@ struct RedisModuleDigest {
 struct redisObject {
     /**
      * 对象类型，取自 OBJ_XXX
+     * 
+     * OBJ_STRING
+     * OBJ_LIST
+     * OBJ_SET
+     * OBJ_ZSET
+     * OBJ_HASH
+     * 
+     * OBJ_MODULE
+     * OBJ_STREAM
+     * OBJ_TYPE_MAX
      */
     unsigned type:4;
+    
     /**
      * 对象的编码，取自 OBJ_ENCODING_XXX
+     * 
+     * OBJ_ENCODING_RAW
+     * OBJ_ENCODING_INT
+     * OBJ_ENCODING_HT
+     * OBJ_ENCODING_ZIPMAP
+     * OBJ_ENCODING_LINKEDLIST
+     * OBJ_ENCODING_ZIPLIST
+     * OBJ_ENCODING_INTSET
+     * OBJ_ENCODING_SKIPLIST
+     * OBJ_ENCODING_EMBSTR
+     * OBJ_ENCODING_QUICKLIST
+     * OBJ_ENCODING_STREAM
+     * OBJ_ENCODING_LISTPACK
+     * OBJ_ENCODING_LISTPACK_EX
      */
     unsigned encoding:4;
+    
     /**
      * LRU(Least Recente Used) time （相对于全局 lru_lock），
      * 或 LFU(Least F Used) 数据（最低有效8位频率和最高16位有效访问时间）
      */
     unsigned lru:LRU_BITS;
+    
     /**
      * 被引用的数量，因为 Redis 对象是共享的
      */
     int refcount;
+
     /**
-     * 实际的值
+     * 实际的值，具体的格式由type和encoding共同决定
      */
     void *ptr;
 };

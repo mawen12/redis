@@ -63,7 +63,7 @@ static void hashDictWithExpireOnRelease(dict *d);
 static robj* hashTypeLookupWriteOrCreate(client *c, robj *key);
 
 /*-----------------------------------------------------------------------------
- * Define dictType of hash
+ * 定义哈希的字典类型
  *
  * - Stores fields as mstr strings with optional metadata to attach TTL
  * - Note that small hashes are represented with listpacks
@@ -72,7 +72,7 @@ static robj* hashTypeLookupWriteOrCreate(client *c, robj *key);
  *   Expiration (HFE) and using dictType `mstrHashDictTypeWithHFE`
  *----------------------------------------------------------------------------*/
 dictType mstrHashDictType = {
-    dictSdsHash,                                /* lookup hash function */
+    dictSdsHash,                                /* 查找哈希函数 */
     NULL,                                       /* key dup */
     NULL,                                       /* val dup */
     dictSdsMstrKeyCompare,                      /* lookup key compare */
@@ -869,31 +869,53 @@ int hashTypeExists(redisDb *db, robj *o, sds field, int hfeFlags, int *isHashDel
 #define HASH_SET_TAKE_VALUE  (1<<1)
 #define HASH_SET_KEEP_TTL (1<<2)
 #define HASH_SET_COPY 0
+
+/**
+ * 将值写入到哈希对象
+ * 
+ * @param db 数据库
+ * @param o 值对象
+ * @param field 键字符串
+ * @param value 值字符串
+ * @param flags 标识
+ * @retval 0 
+ * @retval 1
+ */
 int hashTypeSet(redisDb *db, robj *o, sds field, sds value, int flags) {
     int update = 0;
 
-    /* Check if the field is too long for listpack, and convert before adding the item.
-     * This is needed for HINCRBY* case since in other commands this is handled early by
-     * hashTypeTryConversion, so this check will be a NOP. */
+    /**
+     * 检查如果字段字符串对于listpack太长，则在添加元素前转换为HT编码。
+     * 这对于 HINCRBY* 情况来说是必须的，因为在其他命令中，这已由 
+     * hashTypeTryConversion 提前处理，因此此检查将是NOP
+     */
     if (o->encoding == OBJ_ENCODING_LISTPACK  ||
         o->encoding == OBJ_ENCODING_LISTPACK_EX) {
+        // 如果字段或值长度超过了阈值，则转换为HT编码
         if (sdslen(field) > server.hash_max_listpack_value || sdslen(value) > server.hash_max_listpack_value)
             hashTypeConvert(o, OBJ_ENCODING_HT, &db->hexpires);
     }
 
-    if (o->encoding == OBJ_ENCODING_LISTPACK) {
+    if (o->encoding == OBJ_ENCODING_LISTPACK) {// 处理 listpack 编码
+        /**
+         * zl 指向值对象的字符串
+         * fptr 指向字段的字符串
+         * vptr 指向值的字符串
+         */
         unsigned char *zl, *fptr, *vptr;
 
         zl = o->ptr;
+        // 获取首个元素
         fptr = lpFirst(zl);
         if (fptr != NULL) {
+            // 查找元素
             fptr = lpFind(zl, fptr, (unsigned char*)field, sdslen(field), 1);
             if (fptr != NULL) {
-                /* Grab pointer to the value (fptr points to the field) */
+                // 获取指向值的指针（fptr指向字段）
                 vptr = lpNext(zl, fptr);
                 serverAssert(vptr != NULL);
 
-                /* Replace value */
+                /* 替换值 */
                 zl = lpReplace(zl, &vptr, (unsigned char*)value, sdslen(value));
                 update = 1;
             }
@@ -1254,11 +1276,22 @@ void hashTypeSetExDone(HashTypeSetEx *ex) {
  *
  * Return 1 on deleted and 0 on not found.
  * isSdsField - 1 if the field is sds, 0 if it is hfield */
+
+/**
+ * 从哈希中删除一个元素。
+ * 
+ * @param o 哈希对象
+ * @param field 字段指针
+ * @param isSdsField 1：是sds，0：是hfield
+ * 
+ * @retval 0 删除成功
+ * @retval 1 元素未发现
+ */
 int hashTypeDelete(robj *o, void *field, int isSdsField) {
     int deleted = 0;
     int fieldLen = (isSdsField) ? sdslen((sds)field) : hfieldlen((hfield)field);
 
-    if (o->encoding == OBJ_ENCODING_LISTPACK) {
+    if (o->encoding == OBJ_ENCODING_LISTPACK) {// LISTPACK 编码
         unsigned char *zl, *fptr;
 
         zl = o->ptr;
@@ -1272,7 +1305,7 @@ int hashTypeDelete(robj *o, void *field, int isSdsField) {
                 deleted = 1;
             }
         }
-    } else if (o->encoding == OBJ_ENCODING_LISTPACK_EX) {
+    } else if (o->encoding == OBJ_ENCODING_LISTPACK_EX) {// LISTPACK_EX 编码
         unsigned char *fptr;
         listpackEx *lpt = o->ptr;
 
@@ -1285,7 +1318,7 @@ int hashTypeDelete(robj *o, void *field, int isSdsField) {
                 deleted = 1;
             }
         }
-    } else if (o->encoding == OBJ_ENCODING_HT) {
+    } else if (o->encoding == OBJ_ENCODING_HT) {// HT 编码
         /* dictDelete() will call dictHfieldDestructor() */
         dictUseStoredKeyApi((dict*)o->ptr, isSdsField ? 0 : 1);
         if (dictDelete((dict*)o->ptr, field) == C_OK) {
@@ -1332,6 +1365,11 @@ unsigned long hashTypeLength(const robj *o, int subtractExpiredFields) {
     return length;
 }
 
+/**
+ * 初始化迭代器
+ * 
+ * @param subject 
+ */
 hashTypeIterator *hashTypeInitIterator(robj *subject) {
     hashTypeIterator *hi = zmalloc(sizeof(hashTypeIterator));
     hi->subject = subject;
@@ -1555,12 +1593,24 @@ hfield hashTypeCurrentObjectNewHfield(hashTypeIterator *hi) {
     return hf;
 }
 
+/**
+ * 查找写或创建对象
+ * 
+ * @param c 客户端
+ * @param key 键
+ * @retval 键的值
+ */
 static robj *hashTypeLookupWriteOrCreate(client *c, robj *key) {
+    // 查找键的值
     robj *o = lookupKeyWrite(c->db,key);
+    // 如果类型不是HASH，则返回NULL
     if (checkType(c,o,OBJ_HASH)) return NULL;
 
+    // 如果值为NULL，则创建并保存到数据库
     if (o == NULL) {
+        // 创建基于listpack编码的哈希对象
         o = createHashObject();
+        // 保存到数据库
         dbAdd(c->db,key,o);
     }
     return o;
@@ -1569,6 +1619,9 @@ static robj *hashTypeLookupWriteOrCreate(client *c, robj *key) {
 
 /**
  * 执行哈希类型转换，用于从 LISTAPCK 转换到 HT 编码
+ * 
+ * @param o 
+ * @param enc 编码，OBJ_ENCODING_*
  */
 void hashTypeConvertListpack(robj *o, int enc) {
     serverAssert(o->encoding == OBJ_ENCODING_LISTPACK);
@@ -1577,32 +1630,36 @@ void hashTypeConvertListpack(robj *o, int enc) {
     if (enc == OBJ_ENCODING_LISTPACK) {
         /* Nothing to do... */
 
-    } else if (enc == OBJ_ENCODING_LISTPACK_EX) {// 如果目标是
+    } else if (enc == OBJ_ENCODING_LISTPACK_EX) {// 如果目标是 LISTPACKEX 编码
         unsigned char *p;
 
-        /* Append HASH_LP_NO_TTL to each field name - value pair. */
+        // 追加 HASH_LP_NO_TTL 到每个字段-值对上
         p = lpFirst(o->ptr);
         while (p != NULL) {
             p = lpNext(o->ptr, p);
             serverAssert(p);
-
+            // 直接使用64位数字
             o->ptr = lpInsertInteger(o->ptr, HASH_LP_NO_TTL, p, LP_AFTER, &p);
+            // 循环到下一个
             p = lpNext(o->ptr, p);
         }
-
+        // 创建 listpackEx
         listpackEx *lpt = listpackExCreate();
+        // 将其指向
         lpt->lp = o->ptr;
         o->encoding = OBJ_ENCODING_LISTPACK_EX;
         o->ptr = lpt;
-    } else if (enc == OBJ_ENCODING_HT) {
+    } else if (enc == OBJ_ENCODING_HT) {// 如果目标是 HT 编码
         hashTypeIterator *hi;
         dict *dict;
         int ret;
 
+        // 创建迭代器
         hi = hashTypeInitIterator(o);
+        // 创建字典
         dict = dictCreate(&mstrHashDictType);
 
-        /* Presize the dict to avoid rehashing */
+        // 预分配字典以避免重哈希
         dictExpand(dict,hashTypeLength(o, 0));
 
         while (hashTypeNext(hi, 0) != C_ERR) {
@@ -2186,6 +2243,7 @@ void hsetnxCommand(client *c) {
         dbAdd(c->db,c->argv[1],o);
     }
 
+    // 检查是否要进行编码转换
     hashTypeTryConversion(c->db, o,c->argv,2,3);
 
     hashTypeSet(c->db, o,c->argv[2]->ptr,c->argv[3]->ptr,HASH_SET_COPY);
@@ -2196,18 +2254,30 @@ void hsetnxCommand(client *c) {
     server.dirty++;
 }
 
+/**
+ * HSET命令入口
+ * 
+ * 命令格式：HSET key field value [field value ...]
+ * 
+ * @param c 携带命令的客户端
+ */
 void hsetCommand(client *c) {
     int i, created = 0;
     robj *o;
 
+    // 参数的总数量应该是偶数倍
     if ((c->argc % 2) == 1) {
         addReplyErrorArity(c);
         return;
     }
 
-    if ((o = hashTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
+    // 查找对象，如果不存在，则创建
+    if ((o = hashTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) 
+        return;
+    // 检查是否需要从listpack转换到ht编码
     hashTypeTryConversion(c->db,o,c->argv,2,c->argc-1);
 
+    // 保存哈希，并统计创建成功的数量
     for (i = 2; i < c->argc; i += 2)
         created += !hashTypeSet(c->db, o,c->argv[i]->ptr,c->argv[i+1]->ptr,HASH_SET_COPY);
 
@@ -2225,6 +2295,13 @@ void hsetCommand(client *c) {
     server.dirty += (c->argc - 2)/2;
 }
 
+/**
+ * HINCBY命令入口
+ * 
+ * 命令格式：HINCBY key field increment
+ * 
+ * @param c 携带命令的客户端
+ */
 void hincrbyCommand(client *c) {
     long long value, incr, oldvalue;
     robj *o;
@@ -2232,42 +2309,53 @@ void hincrbyCommand(client *c) {
     unsigned char *vstr;
     unsigned int vlen;
 
+    // 检查长度是否合法，非法直接中止
     if (getLongLongFromObjectOrReply(c,c->argv[3],&incr,NULL) != C_OK) return;
+    // 检查key是否存在，不存在直接中止
     if ((o = hashTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
 
-    GetFieldRes res = hashTypeGetValue(c->db,o,c->argv[2]->ptr,&vstr,&vlen,&value,
-                                       HFE_LAZY_EXPIRE);
-    if (res == GETF_OK) {
+    // 获取字段的值
+    GetFieldRes res = hashTypeGetValue(c->db,o,c->argv[2]->ptr,&vstr,&vlen,&value, HFE_LAZY_EXPIRE);
+    if (res == GETF_OK) {// 值存在
         if (vstr) {
+            // 将字符串vstr转换为long long，并保存到value
             if (string2ll((char*)vstr,vlen,&value) == 0) {
-                addReplyError(c,"hash value is not an integer");
+                addReplyError(c,"hash value is not an integer"); // 转换失败，直接中止
                 return;
             }
-        } /* Else hashTypeGetValue() already stored it into &value */
-    } else if ((res == GETF_NOT_FOUND) || (res == GETF_EXPIRED)) {
+        } // 否则 hashTypeGetValue() 已经将其存储到 &value
+    } else if ((res == GETF_NOT_FOUND) || (res == GETF_EXPIRED)) {// 值不存在或已过期，则初始化为0
         value = 0;
     } else {
-        /* Field expired and in turn hash deleted. Create new one! */
+        // 字段已过期，哈希值也已删除！请创建新的哈希值。
         o = createHashObject();
         dbAdd(c->db,c->argv[1],o);
         value = 0;
     }
 
     oldvalue = value;
+    // 检查值是否越界
     if ((incr < 0 && oldvalue < 0 && incr < (LLONG_MIN-oldvalue)) ||
         (incr > 0 && oldvalue > 0 && incr > (LLONG_MAX-oldvalue))) {
         addReplyError(c,"increment or decrement would overflow");
         return;
     }
+    // 累加
     value += incr;
+    // 将 long long 转换为 sds
     new = sdsfromlonglong(value);
+    // 更新到hash对象的字段中
     hashTypeSet(c->db, o,c->argv[2]->ptr,new,HASH_SET_TAKE_VALUE | HASH_SET_KEEP_TTL);
+    // 添加答复
     addReplyLongLong(c,value);
     signalModifiedKey(c,c->db,c->argv[1]);
     notifyKeyspaceEvent(NOTIFY_HASH,"hincrby",c->argv[1],c->db->id);
     server.dirty++;
 }
 
+/**
+ * 
+ */
 void hincrbyfloatCommand(client *c) {
     long double value, incr;
     long long ll;
@@ -2350,59 +2438,86 @@ static GetFieldRes addHashFieldToReply(client *c, robj *o, sds field, int hfeFla
     return res;
 }
 
+/**
+ * HGET命令入口
+ * 
+ * 命令格式：HGET key field
+ * 
+ * @param c 携带命令的客户端
+ */
 void hgetCommand(client *c) {
     robj *o;
 
-    if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.null[c->resp])) == NULL ||
-        checkType(c,o,OBJ_HASH)) return;
+    // 值不存在或类型不是HASH时，直接返回
+    if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.null[c->resp])) == NULL || checkType(c,o,OBJ_HASH)) 
+        return;
 
+    // 答复
     addHashFieldToReply(c, o, c->argv[2]->ptr, HFE_LAZY_EXPIRE);
 }
 
+/**
+ * HMGET命令入口
+ * 
+ * 命令格式：HMGET key field [field ...]
+ * 
+ * @param c 携带命令的客户端
+ */
 void hmgetCommand(client *c) {
     GetFieldRes res = GETF_OK;
     robj *o;
     int i;
     int expired = 0, deleted = 0;
 
-    /* Don't abort when the key cannot be found. Non-existing keys are empty
-     * hashes, where HMGET should respond with a series of null bulks. */
+    // 当key不存在时不要终止。不存在的key代表空哈希，HMGET应该以一系列空批量进行响应
     o = lookupKeyRead(c->db, c->argv[1]);
+    // 类型不是HASH，直接返回
     if (checkType(c,o,OBJ_HASH)) return;
 
+    // 添加批量答复
     addReplyArrayLen(c, c->argc-2);
+    // 循环写入
     for (i = 2; i < c->argc ; i++) {
         if (!deleted) {
+            // 添加响应
             res = addHashFieldToReply(c, o, c->argv[i]->ptr, HFE_LAZY_NO_NOTIFICATION);
             expired += (res == GETF_EXPIRED);
             deleted += (res == GETF_EXPIRED_HASH);
         } else {
-            /* If hash got lazy expired since all fields are expired (o is invalid),
-             * then fill the rest with trivial nulls and return. */
+            // 如果由于所有字段都过期了而导致哈希变得懒过期，则用简单空值填充其余部分并返回。
             addReplyNull(c);
         }
     }
 
+    // 如果由过期的，则触发过期事件
     if (expired) {
         notifyKeyspaceEvent(NOTIFY_HASH, "hexpired", c->argv[1], c->db->id);
+        // 如果有删除的，则触发删除事件
         if (deleted)
             notifyKeyspaceEvent(NOTIFY_GENERIC, "del", c->argv[1], c->db->id); 
     }
 }
 
+/**
+ * HDEL命令入口
+ * 
+ * 命令格式：HDEL key field [field ...]
+ */
 void hdelCommand(client *c) {
     robj *o;
     int j, deleted = 0, keyremoved = 0;
 
-    if ((o = lookupKeyWriteOrReply(c,c->argv[1],shared.czero)) == NULL ||
-        checkType(c,o,OBJ_HASH)) return;
+    // 键不存在，或类型错误，直接中止
+    if ((o = lookupKeyWriteOrReply(c,c->argv[1],shared.czero)) == NULL || checkType(c,o,OBJ_HASH)) 
+        return;
 
-    /* Hash field expiration is optimized to avoid frequent update global HFE DS for
-     * each field deletion. Eventually active-expiration will run and update or remove
-     * the hash from global HFE DS gracefully. Nevertheless, statistic "subexpiry"
-     * might reflect wrong number of hashes with HFE to the user if it is the last
-     * field with expiration. The following logic checks if this is indeed the last
-     * field with expiration and removes it from global HFE DS. */
+    /**
+     * 优化哈希字段过期问题，避免每次删除字段都要频繁更新全局HFE DS。
+     * 最终，active-expiration 将运行正常更新或删除全局HFE DS中的哈希值。
+     * 尽管如此，如果'subexpiry'是最后一个到期字段，统计信息可能会向用户
+     * 反应错误的HFE哈希函数。以下逻辑检查这是否确实是最后一个到期字段，
+     * 并将其从全局HFE DS中删除。
+     */
     int isHFE = hashTypeIsFieldsWithExpire(o);
 
     for (j = 2; j < c->argc; j++) {

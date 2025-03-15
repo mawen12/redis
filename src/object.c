@@ -264,9 +264,17 @@ robj *createSetListpackObject(void) {
     return o;
 }
 
+/**
+ * 创建一个空的哈希对象，使用 LIStPACK 编码
+ * 
+ * @retval 创建好的哈希对象
+ */
 robj *createHashObject(void) {
+    // 创建新的listpack对象，容量为0
     unsigned char *zl = lpNew(0);
+    // 将listpack封装为Redis的哈希对象
     robj *o = createObject(OBJ_HASH, zl);
+    // 设置编码为listpack
     o->encoding = OBJ_ENCODING_LISTPACK;
     return o;
 }

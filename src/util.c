@@ -426,79 +426,93 @@ err:
     return 0;
 }
 
-/* Convert a string into a long long. Returns 1 if the string could be parsed
- * into a (non-overflowing) long long, 0 otherwise. The value will be set to
- * the parsed value when appropriate.
- *
- * Note that this function demands that the string strictly represents
- * a long long: no spaces or other characters before or after the string
- * representing the number are accepted, nor zeroes at the start if not
- * for the string "0" representing the zero number.
- *
- * Because of its strictness, it is safe to use this function to check if
- * you can convert a string into a long long, and obtain back the string
- * from the number without any loss in the string representation. */
+/**
+ * 将字符串转换为long long。转换成功时，值将被设置到参数value上。
+ * 
+ * 请注意：该函数要求字符串严格表示一个长整数：表示数字的字符串之前或之后不接受任何空格或其他字符。
+ * 如果不是表示零的字符串'0'，则开头也不接受零。
+ * 
+ * 由于其严格性，可以安全地使用此函数来检查是否可以将字符串转换为long long，
+ * 并从数字中获取字符串，而不会在字符串表示形式中造成任何损失。
+ * 
+ * @param s 待转的字符串
+ * @param slen 待转的字符串长度
+ * @param value 转换结果
+ * 
+ * @retval 0 转换失败
+ * @retval 1 转换成功
+ */
 int string2ll(const char *s, size_t slen, long long *value) {
+    // 后续对s的操作都由p承接
     const char *p = s;
+    // 对应slen，但是和v做对应，因为要确保v不能越界
     size_t plen = 0;
+    // 如果s的首尾时符号，则该值被设置为1，否则为0
     int negative = 0;
+    // 从s解析的合法的值，会有越界检查，确保值合法
     unsigned long long v;
 
-    /* A string of zero length or excessive length is not a valid number. */
+    // 如果字符串长度为0，或长度过长不是有效数据，则直接中止
     if (plen == slen || slen >= LONG_STR_SIZE)
         return 0;
 
-    /* Special case: first and only digit is 0. */
+    // 特殊场景，首尾且唯一的数字是0，则直接转换
     if (slen == 1 && p[0] == '0') {
+        // 设置为0
         if (value != NULL) *value = 0;
         return 1;
     }
 
-    /* Handle negative numbers: just set a flag and continue like if it
-     * was a positive number. Later convert into negative. */
+    // 处理负数：仅设置标识并继续，就像它是一个正数一样，稍后转换为负数
     if (p[0] == '-') {
         negative = 1;
         p++; plen++;
 
-        /* Abort on only a negative sign. */
+        // 仅当出现负号时中止
         if (plen == slen)
             return 0;
     }
 
-    /* First digit should be 1-9, otherwise the string should just be 0. */
+    // 首个数字必须在[1, 9]，否则字符串应该为0
     if (p[0] >= '1' && p[0] <= '9') {
+        // 转换为数字
         v = p[0]-'0';
         p++; plen++;
     } else {
+        // 非1-9区间的值，不是字符串
         return 0;
     }
 
-    /* Parse all the other digits, checking for overflow at every step. */
+    // 解析所有其他的数字，每一步都检查是否越界
     while (plen < slen && p[0] >= '0' && p[0] <= '9') {
-        if (v > (ULLONG_MAX / 10)) /* Overflow. */
+        if (v > (ULLONG_MAX / 10)) // 越界
             return 0;
+        // 乘10，往前进一位
         v *= 10;
 
-        if (v > (ULLONG_MAX - (p[0]-'0'))) /* Overflow. */
+        if (v > (ULLONG_MAX - (p[0]-'0'))) // 越界
             return 0;
+        // 累加
         v += p[0]-'0';
 
         p++; plen++;
     }
 
-    /* Return if not all bytes were used. */
+    // 如果并非所有字节都已使用，则返回
+    // case 1: 在上面的处理中，因为越界导致plen没有走到最后
     if (plen < slen)
         return 0;
 
-    /* Convert to negative if needed, and do the final overflow check when
-     * converting from unsigned long long to long long. */
+    // 如果需要，转换为负值。当从 unsigned long long 转换到 long long 时，检查是否越界
     if (negative) {
-        if (v > ((unsigned long long)(-(LLONG_MIN+1))+1)) /* Overflow. */
+        if (v > ((unsigned long long)(-(LLONG_MIN+1))+1)) // 越界
             return 0;
+        // 转换为负值
         if (value != NULL) *value = -v;
     } else {
-        if (v > LLONG_MAX) /* Overflow. */
+        if (v > LLONG_MAX) // 越界
             return 0;
+        // 直接给正值
         if (value != NULL) *value = v;
     }
     return 1;

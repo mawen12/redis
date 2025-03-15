@@ -173,7 +173,10 @@ robj *lookupKeyWriteWithFlags(redisDb *db, robj *key, int flags) {
 }
 
 /**
- * 查找键用于写操作
+ * 查找键的值用于写操作
+ * 
+ * @param db 数据库
+ * @param key 键
  */
 robj *lookupKeyWrite(redisDb *db, robj *key) {
     return lookupKeyWriteWithFlags(db, key, LOOKUP_NONE);
